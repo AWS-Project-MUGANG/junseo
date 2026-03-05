@@ -1,6 +1,12 @@
 // 강의 목록을 저장할 전역 변수 (API 연동)
 let courseList = [];
 
+// 단과대학 → 학과 목록 (필터바용)
+let departmentsData = {};
+
+// 현재 적용된 필터 상태
+let activeFilter = { college: '', department: '', type: '', grade: '' };
+
 // 기존 장바구니 데이터 대신 백엔드에서 불러옵니다.
 let cartData = [];
 
@@ -55,13 +61,59 @@ function switchTab(tabName) {
     }
 }
 
+// 단과대학/학과 목록 API에서 불러와 필터바 초기화
+async function loadDepartments() {
+    try {
+        const res = await fetch('/api/v1/departments');
+        if(res.ok) {
+            const data = await res.json();
+            departmentsData = data.colleges;
+            const sel = document.getElementById('filter-college');
+            if(!sel) return;
+            Object.keys(departmentsData).sort().forEach(college => {
+                const opt = document.createElement('option');
+                opt.value = college;
+                opt.textContent = college;
+                sel.appendChild(opt);
+            });
+        }
+    } catch(e) { console.error('Failed to load departments:', e); }
+}
+
+window.onCollegeChange = function() {
+    const college = document.getElementById('filter-college').value;
+    const deptSel = document.getElementById('filter-department');
+    deptSel.innerHTML = '<option value="">전체 학과</option>';
+    if(college && departmentsData[college]) {
+        departmentsData[college].forEach(dept => {
+            const opt = document.createElement('option');
+            opt.value = dept;
+            opt.textContent = dept;
+            deptSel.appendChild(opt);
+        });
+    }
+    applyFilter();
+};
+
+window.applyFilter = function() {
+    activeFilter.college = document.getElementById('filter-college').value;
+    activeFilter.department = document.getElementById('filter-department').value;
+    activeFilter.type = document.getElementById('filter-type').value;
+    activeFilter.grade = document.getElementById('filter-grade').value;
+    renderSugangList();
+};
+
 // 수강목록 API에서 불러오기
 async function loadCourseList() {
     try {
-        const res = await fetch('/api/v1/courses');
+        const res = await fetch('/api/v1/lectures');
         if(res.ok) {
             const data = await res.json();
-            courseList = data.courses;
+            courseList = data.lectures.map(lec => ({
+                ...lec,
+                id: lec.lecture_id,
+                room: lec.classroom,
+            }));
             renderSugangList();
         }
     } catch(e) { console.error('Failed to load courses:', e); }
@@ -70,7 +122,16 @@ async function loadCourseList() {
 // 수강목록 렌더링
 function renderSugangList() {
     sugangTbody.innerHTML = '';
-    courseList.forEach(item => {
+    let filtered = courseList;
+    if(activeFilter.college) filtered = filtered.filter(i => i.college === activeFilter.college);
+    if(activeFilter.department) filtered = filtered.filter(i => i.department === activeFilter.department);
+    if(activeFilter.type) filtered = filtered.filter(i => i.type === activeFilter.type);
+    if(activeFilter.grade) filtered = filtered.filter(i => String(i.lec_grade) === activeFilter.grade);
+    if(filtered.length === 0) {
+        sugangTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">조건에 해당하는 강의가 없습니다.</td></tr>';
+        return;
+    }
+    filtered.forEach(item => {
         const capacityText = `${item.count} / ${item.capacity}`;
         let badge = '';
         if (item.count >= item.capacity) {
@@ -207,25 +268,22 @@ window.addToCart = async function(id) {
         return;
     }
 
-    const item = courseList.find(c => c.id === id);
+    const item = courseList.find(c => String(c.id) === String(id));
     if (!item) return;
 
-    const exists = cartData.find(c => c.subject === item.subject);
+    const exists = cartData.find(c => c.lecture_id === item.id);
     if (exists) {
         alert("이미 수강신청(DB 저장)이 완료된 과목입니다.");
         return;
     }
-    
+
     try {
         const response = await fetch('/api/v1/enrollments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_id: userId,
-                subject: item.subject,
-                college: item.college,
-                department: item.department,
-                room: item.room
+                lecture_id: parseInt(id)
             })
         });
 
@@ -400,6 +458,32 @@ async function updateProfile() {
     } catch (e) { console.error(e); }
 }
 
+// 사용자 프로필 불러오기 (사이드바 이름/학번/단과대/학과/학년 업데이트)
+async function loadUserProfile() {
+    console.log('[profile] userId:', userId);
+    if (!userId) return;
+    try {
+        const res = await fetch(`/api/v1/users/${userId}`);
+        console.log('[profile] status:', res.status);
+        if (res.ok) {
+            const data = await res.json();
+            const nameEl = document.querySelector('.student-info .name');
+            const idEl = document.querySelector('.student-info .id');
+            const collegeEl = document.querySelector('.department-info p:first-child');
+            const subDeptEl = document.querySelector('.department-info .sub-dept');
+            const yearEl = document.querySelector('.department-info .year');
+            console.log('[profile] data:', data);
+            if (nameEl) nameEl.innerText = data.name;
+            if (idEl) idEl.innerText = data.student_id;
+            if (collegeEl && data.college) collegeEl.innerText = data.college;
+            if (subDeptEl && data.depart) {
+                const gradeText = data.grade ? ` <span class="year">${data.grade}학년</span>` : '';
+                subDeptEl.innerHTML = data.depart + gradeText;
+            }
+        }
+    } catch (e) { console.error('Failed to load user profile:', e); }
+}
+
 // 초기화
 window.onload = async function() {
     // 세션 체크
@@ -407,6 +491,8 @@ window.onload = async function() {
         window.location.href = '../auth/login.html';
         return;
     }
+    await loadUserProfile();
+    await loadDepartments();
     await loadCourseList();
     await checkEnrollmentPeriod();
     await loadEnrollments();

@@ -330,6 +330,19 @@ def find_pw(req: FindPwRequest, db: Session = Depends(get_db)):
 # ---- 이하 생략: 수강신청 관련 엔드포인트 진행 ----
 
 
+# --- 단과대학/학과 목록 ---
+@app.get("/api/v1/departments")
+def get_departments(db: Session = Depends(get_db)):
+    """단과대학 → 학과 목록 반환 (필터바 동적 로딩용)"""
+    departs = db.query(models.Depart).order_by(models.Depart.college, models.Depart.depart).all()
+    colleges = {}
+    for d in departs:
+        if d.college not in colleges:
+            colleges[d.college] = []
+        colleges[d.college].append(d.depart)
+    return {"colleges": colleges}
+
+
 # --- 강의 (lecture_tb) ---
 @app.get("/api/v1/lectures")
 def get_lectures(db: Session = Depends(get_db)):
@@ -349,6 +362,7 @@ def get_lectures(db: Session = Depends(get_db)):
             "lecture_id": lec.lecture_id,
             "course_no": lec.course_no,
             "subject": lec.subject,
+            "college": lec.depart.college if lec.depart else None,
             "department": lec.department,
             "lec_grade": lec.lec_grade,
             "credit": lec.credit,
@@ -910,6 +924,26 @@ def submit_grade(req: GradeRequest, db: Session = Depends(get_db)):
         ))
     db.commit()
     return {"message": "성적이 정상적으로 입력되었습니다."}
+
+
+# --- 사용자 정보 조회 ---
+@app.get("/api/v1/users/{user_id}")
+def get_user_profile(user_id: str, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.user_no == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    return {
+        "user_id": user.user_no,
+        "name": user.user_name,
+        "student_id": user.loginid,
+        "grade": user.grade,
+        "college": user.depart.college if user.depart else None,
+        "depart": user.depart.depart if user.depart else None,
+        "status": user.user_status,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role
+    }
 
 
 # --- 사용자 정보 수정 ---

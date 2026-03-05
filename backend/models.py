@@ -24,11 +24,14 @@ class User(Base):
     role = Column(SAEnum('STUDENT', 'STAFF', name='role_enum'), nullable=False)
     user_name = Column(String(50), nullable=False)
     grade = Column(Integer, nullable=True)
+    dept_no = Column(BigInteger, ForeignKey("depart_tb.dept_no", ondelete="SET NULL"), nullable=True)
     user_status = Column(SAEnum('재학', '휴학', '재직', '퇴직', name='status_enum'), nullable=False)
     email = Column(String(150), unique=True, nullable=True)
     phone = Column(String(20), nullable=True)
     is_first_login = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    depart = relationship("Depart")
 
 
 

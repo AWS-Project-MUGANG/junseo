@@ -17,12 +17,12 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="student-info">
-                    <span class="name">임정현</span>
-                    <span class="id">22517717</span>
+                    <span class="name">-</span>
+                    <span class="id">-</span>
                 </div>
                 <div class="department-info">
-                    <p>사회과학대학</p>
-                    <p class="sub-dept">가정복지학과 <span class="year">2학년</span></p>
+                    <p>-</p>
+                    <p class="sub-dept">- <span class="year"></span></p>
                 </div>
             </div>
 
@@ -52,17 +52,27 @@
                 <div id="panel-sugang" class="panel active">
                     <!-- 필터 영역 -->
                     <div class="filter-bar">
-                        <select>
-                            <option>사회과학대학</option>
+                        <select id="filter-college" onchange="onCollegeChange()">
+                            <option value="">전체 단과대학</option>
                         </select>
-                        <select>
-                            <option>사회복지학부</option>
+                        <select id="filter-department" onchange="applyFilter()">
+                            <option value="">전체 학과</option>
                         </select>
-                        <select>
-                            <option>아동가족복지학과</option>
+                        <select id="filter-type" onchange="applyFilter()">
+                            <option value="">전체 과목 구분</option>
+                            <option value="전공필수">전공필수</option>
+                            <option value="전공선택">전공선택</option>
+                            <option value="교양필수">교양필수</option>
+                            <option value="교양선택">교양선택</option>
+                            <option value="교직">교직</option>
+                            <option value="공통">공통</option>
                         </select>
-                        <select>
-                            <option>2</option>
+                        <select id="filter-grade" onchange="applyFilter()">
+                            <option value="">전체 학년</option>
+                            <option value="1">1학년</option>
+                            <option value="2">2학년</option>
+                            <option value="3">3학년</option>
+                            <option value="4">4학년</option>
                         </select>
                     </div>
 
@@ -243,6 +253,42 @@
                                 </tr>
                                 <tr>
                                     <td class="time-cell">13:00<br>-<br>13:50</td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td class="time-cell">14:00<br>-<br>14:50</td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td class="time-cell">15:00<br>-<br>15:50</td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td class="time-cell">16:00<br>-<br>16:50</td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td class="time-cell">17:00<br>-<br>17:50</td>
                                     <td></td>
                                     <td></td>
                                     <td></td>
