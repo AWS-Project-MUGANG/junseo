@@ -348,6 +348,8 @@ def get_departments(db: Session = Depends(get_db)):
 def get_lectures(db: Session = Depends(get_db)):
     """강의 목록 전체 조회 (수강신청 화면용) - schedule_tb 조인"""
     lectures = db.query(models.Lecture).all()
+    # department 이름 → college 역조회 맵 (dept_no 미설정 강의 fallback용)
+    dept_college_map = {d.depart: d.college for d in db.query(models.Depart).all()}
     result = []
     for lec in lectures:
         schedules = [
@@ -358,12 +360,15 @@ def get_lectures(db: Session = Depends(get_db)):
             }
             for s in lec.schedules
         ]
+        college = lec.depart.college if lec.depart else dept_college_map.get(lec.department)
+        # dept_no FK 연결 시 depart_tb의 공식 학과명 사용 (필터 일치를 위해)
+        department = lec.depart.depart if lec.depart else lec.department
         result.append({
             "lecture_id": lec.lecture_id,
             "course_no": lec.course_no,
             "subject": lec.subject,
-            "college": lec.depart.college if lec.depart else None,
-            "department": lec.department,
+            "college": college,
+            "department": department,
             "lec_grade": lec.lec_grade,
             "credit": lec.credit,
             "professor": lec.professor,
@@ -381,21 +386,27 @@ def get_lectures(db: Session = Depends(get_db)):
 
 @app.get("/api/v1/enrollments/{user_id}")
 def get_user_enrollments(user_id: str, db: Session = Depends(get_db)):
-    """사용자의 수강신청 내역 조회 (lecture_tb 조인)"""
-    enrollments = db.query(models.Enrollment).filter(models.Enrollment.user_id == user_id).all()
+    """사용자의 수강신청 내역 조회 (lecture_tb 조인) - CANCELED 제외"""
+    dept_college_map = {d.depart: d.college for d in db.query(models.Depart).all()}
+    enrollments = db.query(models.Enrollment).filter(
+        models.Enrollment.user_id == user_id,
+        models.Enrollment.enroll_status != "CANCELED"
+    ).all()
     result = []
     for en in enrollments:
         lec = en.lecture
+        college = (lec.depart.college if lec.depart else dept_college_map.get(lec.department)) if lec else None
         result.append({
             "id": en.id,
             "lecture_id": en.lecture_id,
             "subject": lec.subject if lec else None,
-            "department": lec.department if lec else None,
+            "college": college,
+            "department": (lec.depart.depart if lec.depart else lec.department) if lec else None,
             "classroom": lec.classroom if lec else None,
             "professor": lec.professor if lec else None,
             "type": lec.type if lec else None,
             "credits": lec.credit if lec else None,
-            "status": en.status,
+            "enroll_status": en.enroll_status,  # BASKET | COMPLETED | CANCELED
             "created_at": en.created_at.isoformat()
         })
     return {"schedules": result}
@@ -482,12 +493,12 @@ def create_enrollment(req: EnrollmentRequest, db: Session = Depends(get_db)):
     new_enrollment = models.Enrollment(
         user_id=req.user_id,
         lecture_id=req.lecture_id,
-        status="enrolled"
+        enroll_status="BASKET"
     )
     db.add(new_enrollment)
     db.commit()
     db.refresh(new_enrollment)
-    return {"message": "수강신청이 성공적으로 확정되었습니다.", "enrollment_id": new_enrollment.id, "status": "enrolled"}
+    return {"message": "예비 수강신청이 완료되었습니다.", "enrollment_id": new_enrollment.id, "enroll_status": "BASKET"}
 
 
 @app.put("/api/v1/enrollments/{enrollment_id}/confirm")
@@ -499,7 +510,7 @@ def confirm_enrollment(enrollment_id: str, db: Session = Depends(get_db)):
     en = db.query(models.Enrollment).filter(models.Enrollment.id == enrollment_id).first()
     if not en:
         raise HTTPException(status_code=404, detail="해당 수강 내역이 없습니다.")
-    en.status = "enrolled"
+    en.enroll_status = "COMPLETED"
     db.commit()
     return {"message": "최종 수강신청이 확정되었습니다."}
 
@@ -530,7 +541,7 @@ def drop_enrollment(enrollment_id: str, db: Session = Depends(get_db)):
         new_en = models.Enrollment(
             user_id=promoted_waitlist.user_id,
             lecture_id=lecture_id,
-            status="enrolled"
+            enroll_status="COMPLETED"
         )
         db.add(new_en)
         
@@ -712,10 +723,13 @@ async def upload_courses_pdf(file: UploadFile = File(...), db: Session = Depends
                             continue
                         
                         # lecture_tb 데이터 생성
+                        dept_name = row[2].replace('\n', '')
+                        matched_dept = db.query(models.Depart).filter(models.Depart.depart == dept_name).first()
                         lecture = models.Lecture(
                             course_no=c_no,
                             subject=row[4].replace('\n', ''),
-                            department=row[2].replace('\n', ''),
+                            department=dept_name,
+                            dept_no=matched_dept.dept_no if matched_dept else None,
                             lec_grade=row[1],
                             credit=int(row[5]) if row[5].isdigit() else 3,
                             professor=row[7].replace('\n', '') if row[7] else "미지정",
@@ -775,7 +789,7 @@ def get_ai_recommendation(req: AIRecommendRequest, db: Session = Depends(get_db)
             models.Enrollment.lecture_id == l_id
         ).first()
         if not existing:
-            new_en = models.Enrollment(user_id=req.user_id, lecture_id=l_id, status="cart")
+            new_en = models.Enrollment(user_id=req.user_id, lecture_id=l_id, enroll_status="BASKET")
             db.add(new_en)
             inserted_count += 1
             

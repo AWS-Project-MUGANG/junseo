@@ -125,61 +125,78 @@ function renderSugangList() {
     let filtered = courseList;
     if(activeFilter.college) filtered = filtered.filter(i => i.college === activeFilter.college);
     if(activeFilter.department) filtered = filtered.filter(i => i.department === activeFilter.department);
-    if(activeFilter.type) filtered = filtered.filter(i => i.type === activeFilter.type);
-    if(activeFilter.grade) filtered = filtered.filter(i => String(i.lec_grade) === activeFilter.grade);
+    if(activeFilter.type) {
+        // DB 데이터(예: '전공', '전필')와 필터(예: '전공필수') 간 유연한 매칭
+        filtered = filtered.filter(i => i.type && (activeFilter.type.includes(i.type) || i.type.includes(activeFilter.type)));
+    }
+    if(activeFilter.grade) {
+        // '1학년'과 '1' 숫자만 추출하여 비교
+        filtered = filtered.filter(i => String(i.lec_grade).replace(/[^0-9]/g, '') === activeFilter.grade);
+    }
     if(filtered.length === 0) {
-        sugangTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">조건에 해당하는 강의가 없습니다.</td></tr>';
+        sugangTbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#999;">조건에 해당하는 강의가 없습니다.</td></tr>';
         return;
     }
     filtered.forEach(item => {
+        const alreadyInCart = cartData.some(c => c.lecture_id === item.id);
+        const isFull = item.count >= item.capacity;
         const capacityText = `${item.count} / ${item.capacity}`;
         let badge = '';
-        if (item.count >= item.capacity) {
-            badge = `<span style="background:#e53935; color:white; padding:2px 6px; border-radius:4px; font-size:0.8rem; margin-left:5px;">정원초과 (대기 가능)</span>`;
+        if (isFull) {
+            badge = `<span style="background:#e53935; color:white; padding:2px 6px; border-radius:4px; font-size:0.8rem; margin-left:5px;">정원초과</span>`;
+        }
+        let btnLabel = isFull ? '대기하기' : '담기';
+        let btnDisabled = alreadyInCart ? 'disabled style="background:#bbb; cursor:not-allowed;"' : '';
+        if (alreadyInCart) btnLabel = '신청완료';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${item.college || '-'}</td>
+            <td>${item.department || '-'}</td>
+            <td>${item.subject || '-'} ${badge}</td>
+            <td>${item.type || '-'}</td>
+            <td>${item.professor || '-'}</td>
+            <td>${item.classroom || '-'}</td>
+            <td>${item.credit || '-'}</td>
+            <td>${capacityText}</td>
+            <td><button class="btn-apply" onclick="addToCart('${item.id}')" ${btnDisabled}>${btnLabel}</button></td>
+        `;
+        sugangTbody.appendChild(tr);
+    });
+}
+
+// 장바구니 렌더링 (enroll_status 기준: BASKET=예비수강신청, COMPLETED=수강확정)
+function renderCart() {
+    cartTbody.innerHTML = '';
+    if (cartData.length === 0) {
+        cartTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">신청된 수강 내역이 없습니다.</td></tr>';
+        return;
+    }
+
+    cartData.forEach(item => {
+        const status = item.enroll_status;
+        let actionBtn = '';
+        let statusLabel = '';
+
+        if(status === 'COMPLETED') {
+            statusLabel = '<span style="color:#2e7d32; font-weight:bold;">수강확정</span>';
+            actionBtn = `<button class="btn-reject" onclick="dropEnrollment('${item.id}')" style="background-color:#d32f2f; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">수강철회</button>`;
+        } else if(status === 'BASKET') {
+            statusLabel = '<span style="color:#e65100; font-weight:bold;">예비 수강신청</span>';
+            actionBtn = `<button class="btn-approve" onclick="confirmEnrollment('${item.id}')" style="background-color:#2e7d32; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">최종신청</button> <button class="btn-reject" onclick="dropEnrollment('${item.id}')" style="background-color:#757575; color:white; border:none; padding:5px 10px; border-radius:4px; margin-left:4px; cursor:pointer;">삭제</button>`;
+        } else {
+            statusLabel = `<span style="color:#999;">${status || '-'}</span>`;
         }
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${item.college || '-'}</td>
             <td>${item.department || '-'}</td>
-            <td>${item.subject} ${badge}</td>
-            <td>${item.type || '-'}</td>
-            <td>${item.room || '-'}</td>
-            <td>${item.credit}</td>
-            <td>${capacityText}</td>
-            <td><button class="btn-apply" onclick="addToCart('${item.id}')">${item.count >= item.capacity ? '대기하기' : '담기'}</button></td>
-        `;
-        sugangTbody.appendChild(tr);
-    });
-}
-
-// 장바구니 렌더링
-function renderCart() {
-    cartTbody.innerHTML = '';
-    if (cartData.length === 0) {
-        cartTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999;">신청된 수강 내역이 없습니다. (DB 비어있음)</td></tr>';
-        return;
-    }
-
-    cartData.forEach(item => {
-        let actionBtn = '';
-        if(item.status === 'enrolled') {
-            actionBtn = `<button class="btn-reject" onclick="dropEnrollment('${item.id}')" style="background-color:#d32f2f; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">수강철회</button>`;
-        } else {
-            actionBtn = `<button class="btn-approve" onclick="confirmEnrollment('${item.id}')" style="background-color:#2e7d32; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">최종신청</button> <button class="btn-reject" onclick="dropEnrollment('${item.id}')" style="background-color:#757575; color:white; border:none; padding:5px 10px; border-radius:4px; margin-top:5px; cursor:pointer;">삭제</button>`;
-        }
-
-        const statusLabel = item.status === 'enrolled' ? '<span style="color:green; font-weight:bold;">수강확정</span>' : '<span style="color:orange;">장바구니</span>';
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${item.college}</td>
-            <td>${item.department}</td>
-            <td>${item.subject}</td>
+            <td>${item.subject || '-'}</td>
             <td>${statusLabel}</td>
-            <td>${item.room}</td>
-            <td>${item.credits || 3}</td>
-            <td>-</td>
+            <td>${item.classroom || '-'}</td>
+            <td>${item.credits || '-'}</td>
+            <td>${item.professor || '-'}</td>
             <td>${actionBtn}</td>
         `;
         cartTbody.appendChild(tr);
@@ -346,6 +363,7 @@ async function loadEnrollments() {
             cartData = data.schedules;
             renderCart();
             renderTimetable();
+            renderSugangList(); // 신청완료 버튼 상태 동기화
         }
     } catch (error) {
         console.error('Load enrollments error:', error);

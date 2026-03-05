@@ -56,7 +56,6 @@ class Lecture(Base):
     version = Column(Integer, default=0)
 
     depart = relationship("Depart")
-
     schedules = relationship("ScheduleTb", back_populates="lecture", cascade="all, delete-orphan")
     enrollments = relationship("Enrollment", back_populates="lecture")
 
