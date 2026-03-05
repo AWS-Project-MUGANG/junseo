@@ -47,18 +47,19 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="student-info">
-                    <span class="name">김무강 교수</span>
-                    <span class="id">Admin-0012</span>
+                    <span class="name"></span>
+                    <span class="id"></span>
                 </div>
                 <div class="department-info">
-                    <p>사회과학대학</p>
-                    <p class="sub-dept">아동가족복지학과 (강의 전담)</p>
+                    <p></p>
+                    <p class="sub-dept"></p>
                 </div>
             </div>
 
             <nav class="sidebar-nav">
                 <button class="nav-item active" id="tab-dashboard" onclick="switchTab('dashboard')">대시보드 홈</button>
                 <button class="nav-item" id="tab-courses" onclick="switchTab('courses')">수업 개설 관리</button>
+                <button class="nav-item" onclick="location.href='enrollment_schedule.html'">수강신청 기간 설정</button>
                 <button class="nav-item" onclick="location.href='approvals.html'">결재 / 서류 반려함</button>
                 <button class="nav-item" onclick="location.href='rag_update.html'">학사 규정 AI 업데이트</button>
                 <button class="nav-item logout-btn" onclick="location.href='../auth/login.html'">로그아웃</button>
@@ -81,18 +82,17 @@
                     <div class="stat-grid">
                         <div class="admin-stat-card">
                             <p>대학교 전체 수강 신청 건수</p>
-                            <div class="stat-number" id="admin-total-enrollments">0 건</div>
+                            <div class="stat-number" id="admin-total-enrollments">-</div>
                         </div>
                         <div class="admin-stat-card">
                             <p>승인 가능한 대기 서류</p>
-                            <div class="stat-number" id="admin-pending-forms">0 건</div>
+                            <div class="stat-number" id="admin-pending-forms">-</div>
                         </div>
-                        <div class="admin-stat-card">
-                            <div class="admin-stat-card" style="background:var(--secondary-color); color:white;">
-                                <p>현재 가입된 학생 수</p>
-                                <div class="stat-number" id="admin-total-students" style="color:white;">0 명</div>
-                            </div>
+                        <div class="admin-stat-card" style="background:var(--secondary-color); color:white;">
+                            <p>현재 가입된 학생 수</p>
+                            <div class="stat-number" id="admin-total-students" style="color:white;">-</div>
                         </div>
+                    </div>
 
                         <!-- 수강신청 기간 설정 영역 시작 -->
                         <section class="list-section"
@@ -140,15 +140,10 @@
                                     <select id="filter-college" onchange="loadAdminEnrollments()"
                                         style="padding:5px; border-radius:4px; border:1px solid #ccc;">
                                         <option value="">단과대 전체</option>
-                                        <option value="공과대학">공과대학</option>
-                                        <option value="자연과학대학">자연과학대학</option>
-                                        <option value="인문과학대학">인문과학대학</option>
                                     </select>
                                     <select id="filter-grade" onchange="loadAdminEnrollments()"
                                         style="padding:5px; border-radius:4px; border:1px solid #ccc;">
                                         <option value="">전학년</option>
-                                        <option value="1">1학년</option>
-                                        <option value="2">2학년</option>
                                     </select>
                                 </div>
                             </div>
@@ -299,10 +294,28 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', async () => {
-            // 세션 체크
-            if (!localStorage.getItem('access_token')) {
+            // 세션 체크 + STAFF 권한 확인
+            const token = localStorage.getItem('access_token');
+            const role = localStorage.getItem('role');
+            const userId = localStorage.getItem('user_no');
+
+            if (!token || role !== 'STAFF') {
                 window.location.href = '../auth/login.html';
                 return;
+            }
+
+            // 실제 DB 프로필 로드 → 사이드바 반영
+            try {
+                const profileRes = await fetch(`/api/v1/users/${userId}`);
+                if (profileRes.ok) {
+                    const profile = await profileRes.json();
+                    document.querySelector('.sidebar-header .name').innerText = profile.name + ' 교수';
+                    document.querySelector('.sidebar-header .id').innerText = profile.student_id;
+                    document.querySelector('.department-info p').innerText = profile.college || '-';
+                    document.querySelector('.department-info .sub-dept').innerText = profile.depart || '-';
+                }
+            } catch (err) {
+                console.error("프로필 로드 오류:", err);
             }
 
             try {
@@ -323,17 +336,45 @@
 
             // 신규 기능: 관리자 강의 목록 로드
             loadAdminCourses();
+
+            // 필터 옵션 동적 로드
+            initFilters();
         });
 
+        async function initFilters() {
+            try {
+                const res = await fetch('/api/v1/admin/filter-options');
+                if (!res.ok) return;
+                const data = await res.json();
+
+                const collegeSelect = document.getElementById('filter-college');
+                data.colleges.forEach(college => {
+                    const opt = document.createElement('option');
+                    opt.value = college;
+                    opt.textContent = college;
+                    collegeSelect.appendChild(opt);
+                });
+
+                const gradeSelect = document.getElementById('filter-grade');
+                data.grades.forEach(grade => {
+                    const opt = document.createElement('option');
+                    opt.value = grade;
+                    opt.textContent = grade + '학년';
+                    gradeSelect.appendChild(opt);
+                });
+            } catch (e) {
+                console.error("필터 옵션 로드 오류:", e);
+            }
+        }
+
         async function loadAdminEnrollments() {
-            const role = localStorage.getItem('role');
-            const userId = localStorage.getItem('user_id');
             const college = document.getElementById('filter-college')?.value || '';
             const grade = document.getElementById('filter-grade')?.value || '';
 
-            let enrollUrl = role === 'admin' && userId ? `/api/v1/admin/enrollments?professor_id=${userId}` : '/api/v1/admin/enrollments?';
-            if (college) enrollUrl += `&college=${college}`;
-            if (grade) enrollUrl += `&grade=${grade}`;
+            const params = new URLSearchParams();
+            if (college) params.append('college', college);
+            if (grade) params.append('grade', grade);
+            const enrollUrl = `/api/v1/admin/enrollments?${params.toString()}`;
 
             try {
                 const enrollRes = await fetch(enrollUrl);
@@ -573,25 +614,25 @@
         // --- 관리자 강의 관리 API 로직 ---
         async function loadAdminCourses() {
             try {
-                const res = await fetch('/api/v1/courses');
+                const res = await fetch('/api/v1/lectures');
                 if (res.ok) {
                     const data = await res.json();
                     const tbody = document.getElementById('admin-courses-tbody');
                     tbody.innerHTML = '';
-                    if (data.courses.length === 0) {
+                    if (data.lectures.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">개설된 강의가 없습니다.</td></tr>';
                     }
-                    data.courses.forEach(c => {
+                    data.lectures.forEach(c => {
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
                             <td>${c.college || '-'}</td>
                             <td>${c.department || '-'}</td>
                             <td><strong>${c.subject}</strong></td>
                             <td>${c.type || '-'}</td>
-                            <td>${c.room || '-'}</td>
+                            <td>${c.classroom || '-'}</td>
                             <td>${c.credit}</td>
                             <td>${c.capacity}</td>
-                            <td><button class="btn-reject" onclick="deleteAdminCourse('${c.id}')" style="background-color:#d32f2f; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">삭제</button></td>
+                            <td><button class="btn-reject" onclick="deleteAdminCourse('${c.lecture_id}')" style="background-color:#d32f2f; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">삭제</button></td>
                         `;
                         tbody.appendChild(tr);
                     });
@@ -608,7 +649,7 @@
                 room: document.getElementById('course-room').value,
                 credit: parseInt(document.getElementById('course-credit').value) || 3,
                 capacity: parseInt(document.getElementById('course-capacity').value) || 40,
-                professor_id: localStorage.getItem('user_id'),
+                professor_id: localStorage.getItem('user_no'),
                 times: []
             };
 

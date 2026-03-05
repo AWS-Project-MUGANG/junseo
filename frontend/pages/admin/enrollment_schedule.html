@@ -119,12 +119,12 @@
     <aside class="sidebar">
         <div class="sidebar-header" style="background-color: #37474f;">
             <div class="student-info">
-                <span class="name" id="staff-name">관리자</span>
-                <span class="id" id="staff-id">Staff</span>
+                <span class="name" id="staff-name"></span>
+                <span class="id" id="staff-id"></span>
             </div>
             <div class="department-info">
-                <p>교무처</p>
-                <p class="sub-dept">수강신청 관리</p>
+                <p></p>
+                <p class="sub-dept"></p>
             </div>
         </div>
         <nav class="sidebar-nav">
@@ -283,13 +283,24 @@ const RESTRICTION_LABELS = {
 
 // ---- 인증 확인 ----
 const role = localStorage.getItem('role');
-const userId = localStorage.getItem('user_id');
-if (!userId || (role !== 'staff' && role !== 'admin')) {
-    alert('관리자(staff) 권한이 필요합니다.');
-    location.href = '../auth/login.html';
-}
-const storedName = localStorage.getItem('name');
-if (storedName) document.getElementById('staff-name').textContent = storedName;
+const userId = localStorage.getItem('user_no');
+const token = localStorage.getItem('access_token');
+
+// 실제 DB 프로필 → 사이드바 반영
+(async () => {
+    try {
+        const res = await fetch(`/api/v1/users/${userId}`);
+        if (res.ok) {
+            const p = await res.json();
+            document.getElementById('staff-name').textContent = p.name;
+            document.getElementById('staff-id').textContent = p.student_id;
+            const deptEl = document.querySelector('.sidebar-header .department-info p');
+            const subEl  = document.querySelector('.sidebar-header .department-info .sub-dept');
+            if (deptEl) deptEl.textContent = p.college || '-';
+            if (subEl)  subEl.textContent  = p.depart  || '-';
+        }
+    } catch (e) { console.error('프로필 로드 오류:', e); }
+})();
 
 function logout() {
     localStorage.clear();
@@ -332,7 +343,9 @@ function getStatusCell(openStr, closeStr, isActive) {
 // ---- 일정 로드 ----
 async function loadSchedule() {
     try {
-        const res  = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`);
+        const res  = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         const data = await res.json();
         const schedules = data.schedules || [];
 
@@ -434,7 +447,10 @@ async function saveSchedule() {
     try {
         const res = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({ schedules })
         });
         const data = await res.json();

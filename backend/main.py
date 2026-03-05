@@ -251,7 +251,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         "require_setup": False,
         "access_token": access_token,
         "token_type": "bearer",
-        "user_id": user.user_no,
+        "user_no": user.user_no,
         "name": user.user_name,
         "role": user.role
     }
@@ -341,6 +341,25 @@ def get_departments(db: Session = Depends(get_db)):
             colleges[d.college] = []
         colleges[d.college].append(d.depart)
     return {"colleges": colleges}
+
+
+# --- 필터 옵션 (단과대 + 학년) ---
+@app.get("/api/v1/admin/filter-options")
+def get_filter_options(db: Session = Depends(get_db)):
+    """관리자 필터바용: DB에서 단과대 목록 및 강의 학년 목록 반환"""
+    departs = db.query(models.Depart.college).distinct().order_by(models.Depart.college).all()
+    colleges = [row.college for row in departs if row.college]
+
+    grades = (
+        db.query(models.Lecture.lec_grade)
+        .filter(models.Lecture.lec_grade.isnot(None))
+        .distinct()
+        .order_by(models.Lecture.lec_grade)
+        .all()
+    )
+    grade_list = [str(row.lec_grade) for row in grades if row.lec_grade]
+
+    return {"colleges": colleges, "grades": grade_list}
 
 
 # --- 강의 (lecture_tb) ---
@@ -609,18 +628,23 @@ def get_admin_enrollments(
     db: Session = Depends(get_db)
 ):
     """관리자용: 개설 과목별 수강생 전체 현황 (필터링 추가)"""
+    dept_college_map = {d.depart: d.college for d in db.query(models.Depart).all()}
+
     query = db.query(models.Enrollment)
-    
-    # 조인을 활용한 동적 필터링 처리 (예시 수준)
     if lecture_id:
         query = query.filter(models.Enrollment.lecture_id == lecture_id)
-        
+
     enrollments = query.all()
     summary = {}
     for en in enrollments:
         lec = en.lecture
-        # 필터링 적용 여부 체크 로직 등 보완 가능
-        if college and lec and lec.department != college:
+        if not lec:
+            continue
+
+        lec_college = lec.depart.college if lec.depart else dept_college_map.get(lec.department)
+        if college and lec_college != college:
+            continue
+        if grade and str(lec.lec_grade) != str(grade):
             continue
             
         subject_key = lec.subject if lec else "Unknown"
@@ -734,7 +758,7 @@ async def upload_courses_pdf(file: UploadFile = File(...), db: Session = Depends
                             credit=int(row[5]) if row[5].isdigit() else 3,
                             professor=row[7].replace('\n', '') if row[7] else "미지정",
                             classroom=row[9].replace('\n', '') if row[9] else "미지정",
-                            type=row[0][:2],
+                            type=row[0].strip(),
                             capacity=40,
                             version=0
                         )

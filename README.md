@@ -6,11 +6,10 @@ ssh -i "mugang-key.pem" -L 5432:terraform-20260303070103185000000001.cba8sagacwb
 
 
 # backend
-uvicorn main:app --reload
+python -m uvicorn main:app --reload
 
 # frontend
 python -m http.server 8080
 
-22517717 / 1234
-
-Admin-0012 / 1234
+# 교직원 로그인 정보
+staff / 123123123

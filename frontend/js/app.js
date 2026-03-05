@@ -11,7 +11,7 @@ let activeFilter = { college: '', department: '', type: '', grade: '' };
 let cartData = [];
 
 // 사용자 정보
-const userId = localStorage.getItem('user_id');
+const userId = localStorage.getItem('user_no');
 
 // 수강신청 가능 여부 상태
 let isEnrollmentActive = false; // Changed from true to false
