@@ -1,25 +1,18 @@
 import pdfplumber
-import sqlite3
 import os
-import re
+from sqlalchemy.orm import Session
+from database import SessionLocal, engine
+import models
 
-# 1. 데이터베이스 초기화
-def init_db():
-    conn = sqlite3.connect('mugang.db')
-    cursor = conn.cursor()
-    # 이미지의 구조에 맞춰 테이블 생성
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS College (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    conn.commit()
-    return conn
+# 1. 데이터베이스 세션 생성
+def get_db_session():
+    # models.py에 정의된 테이블이 없으면 생성
+    models.Base.metadata.create_all(bind=engine)
+    return SessionLocal()
 
-# 2. PDF에서 단과대학 정보 추출
-def extract_colleges_from_pdf(file_path):
-    colleges = set()
+# 2. PDF에서 학과/학부 정보 추출
+def extract_departments_from_pdf(file_path):
+    departments = set()
     
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
@@ -27,20 +20,27 @@ def extract_colleges_from_pdf(file_path):
             if not text:
                 continue
             
-            # PDF 상단 또는 표 머리글 근처의 단과대학 명칭 패턴 매칭
-            # 예: "사범대학", "간호대학", "인문대학" 등 '대학'으로 끝나는 단어 추출
-            matches = re.findall(r'(\S+대학)(?:\s|$)', text)
-            for match in matches:
-                # "대학전체" 같은 공통 항목은 제외 (필요시 포함)
-                if match != "대학전체":
-                    colleges.add(match)
+            lines = text.split('\n')
+            # 첫 번째 줄: '전공 강의시간표', 두 번째 줄: 학부/학과명
+            if len(lines) >= 2:
+                line_text = lines[1].strip()
+                # '전공 강의시간표', '대학전체' 등 제외
+                if line_text and line_text != '전공 강의시간표' and line_text != '대학전체':
+                    # 공백으로 분리 (예: "사회과학대학 아동가족복지학과")
+                    parts = line_text.split()
+                    if len(parts) >= 2:
+                        college = parts[0]
+                        dept = " ".join(parts[1:])
+                    else:
+                        college = "미지정"
+                        dept = line_text
+                    departments.add((college, dept))
                     
-    return colleges
+    return departments
 
 # 3. 메인 실행 로직
 def main():
-    conn = init_db()
-    cursor = conn.cursor()
+    db = get_db_session()
     
     # 처리할 PDF 파일 리스트
     pdf_files = [
@@ -49,33 +49,43 @@ def main():
         '2026_1_lecture_07_07.pdf'
     ]
     
-    all_colleges = set()
+    all_departments = set()
 
     print("데이터 추출 중...")
     for file in pdf_files:
         if os.path.exists(file):
-            found = extract_colleges_from_pdf(file)
-            all_colleges.update(found)
-            print(f"[{file}] 추출 완료: {found}")
+            found = extract_departments_from_pdf(file)
+            all_departments.update(found)
+            print(f"[{file}] 추출 완료: {len(found)}개 학과")
 
-    # 4. DB에 저장
+    # 4. DB에 저장 (college, office_tel은 NULL로 저장)
     print("\nDB 저장 중...")
-    for college_name in all_colleges:
-        try:
-            cursor.execute('INSERT INTO College (name) VALUES (?)', (college_name,))
-        except sqlite3.IntegrityError:
-            # 중복 데이터인 경우 무시
-            pass
+    inserted = 0
+    for college_name, dept_name in sorted(all_departments, key=lambda x: x[1]):
+        # 이미 존재하는지 확인 (중복 방지)
+        existing = db.query(models.Depart).filter(models.Depart.depart == dept_name).first()
+        
+        if not existing:
+            new_dept = models.Depart(
+                college=college_name,      # PDF에서 추출한 단과대학 정보
+                depart=dept_name,
+                office_tel="000-0000" # PDF에서 추출 불가 시 기본값
+            )
+            db.add(new_dept)
+            inserted += 1
 
-    conn.commit()
+    db.commit()
+    print(f"총 {inserted}개 학과 저장 완료")
     
     # 결과 확인
-    cursor.execute('SELECT * FROM College')
-    print("\n--- 저장된 단과대학 목록 ---")
-    for row in cursor.fetchall():
-        print(f"ID: {row[0]} | 명칭: {row[1]}")
+    departments = db.query(models.Depart).all()
+    print("\n--- 저장된 학과 목록 ---")
+    print(f"{'dept_no':<10} {'college':<15} {'depart':<40} {'office_tel':<15}")
+    print("-" * 80)
+    for dept in departments:
+        print(f"{dept.dept_no:<10} {dept.college:<15} {dept.depart:<40} {dept.office_tel:<15}")
         
-    conn.close()
+    db.close()
 
 if __name__ == "__main__":
     main()
