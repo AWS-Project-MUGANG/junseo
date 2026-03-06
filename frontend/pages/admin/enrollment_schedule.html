@@ -128,13 +128,11 @@
                 <p class="sub-dept"></p>
             </div>
         </div>
-        <!-- onclick="switchNav('dashboard.html?tab=courses', 'tab-courses') -->
         <nav class="sidebar-nav">
-            <button class="nav-item" id="tab-dashboard" onclick="switchNav('dashboard.html', 'tab-dashboard')">대시보드 홈</button>
-            <button class="nav-item" id="tab-courses" onclick="switchNav('dashboard.html?tab=courses', 'tab-courses')">수업 개설 관리</button>
-            <button class="nav-item active" id="tab-enrollment">수강신청 기간 설정</button>
-            <button class="nav-item" id="tab-rag" onclick="switchNav('rag_update.html', 'tab-rag')">학사 규정 AI 업데이트</button>
-            <button class="nav-item" id="tab-server" onclick="switchNav('server_management.html', 'tab-server')">서버 관리</button>
+            <button class="nav-item active" onclick="location.href='enrollment_schedule.html'">수강신청 기간 설정</button>
+            <!-- <button class="nav-item" onclick="location.href='dashboard.html'">대시보드 홈</button> -->
+            <button class="nav-item" onclick="location.href='course_management.html'">수업 개설 관리</button>
+            <button class="nav-item" onclick="location.href='rag_update.html'">학사 규정 AI 업데이트</button>
             <button class="nav-item logout-btn" onclick="logout()">로그아웃</button>
         </nav>
     </aside>
@@ -143,8 +141,7 @@
     <main class="main-content">
         <header class="top-header">
             <div class="logo-area">
-                <h1>무강대학교 - 관리자 센터</h1>
-                <span class="logo-sub">수강신청 기간 · 일차별 제한 설정</span>
+                <h1>무강대학교 - 수강신청 일정 관리</h1>
             </div>
         </header>
 

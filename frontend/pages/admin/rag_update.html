@@ -31,11 +31,10 @@
         </div>
       </div>
         <nav class="sidebar-nav">
-          <button class="nav-item" id="tab-dashboard" onclick="switchNav('dashboard.html', 'tab-dashboard')">대시보드 홈</button>
-          <button class="nav-item" id="tab-courses" onclick="switchNav('dashboard.html?tab=courses', 'tab-courses')">수업 개설 관리</button>
-          <button class="nav-item" id="tab-enrollment" onclick="switchNav('enrollment_schedule.html', 'tab-enrollment')">수강신청 기간 설정</button>
-          <button class="nav-item active" id="tab-rag">학사 규정 AI 업데이트</button>
-          <button class="nav-item" id="tab-server" onclick="switchNav('server_management.html', 'tab-server')">서버 관리</button>
+          <button class="nav-item" onclick="location.href='enrollment_schedule.html'">수강신청 기간 설정</button>
+          <!-- <button class="nav-item" onclick="location.href='dashboard.html'">대시보드 홈</button> -->
+          <button class="nav-item" onclick="location.href='course_management.html'">수업 개설 관리</button>
+          <button class="nav-item active" onclick="location.href='rag_update.html'">학사 규정 AI 업데이트</button>
           <button class="nav-item logout-btn" onclick="logout()">로그아웃</button>
         </nav>
     </aside>
@@ -80,7 +79,7 @@
         const res = await fetch(`/api/v1/users/${userId}`);
         if (res.ok) {
           const p = await res.json();
-          document.querySelector('.sidebar-header .name').textContent = p.name + ' 교수';
+          document.querySelector('.sidebar-header .name').textContent = p.name;
           document.querySelector('.sidebar-header .id').textContent = p.student_id;
           const deptEl = document.querySelector('.department-info p');
           const subEl  = document.querySelector('.department-info .sub-dept');
