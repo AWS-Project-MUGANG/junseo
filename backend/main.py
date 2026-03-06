@@ -926,26 +926,16 @@ async def upload_courses_pdf(file: UploadFile = File(...), db: Session = Depends
                         c_room = row[9].replace('\n', '') if row[9] else "미지정"
                         
                         # lecture_tb 데이터 생성
-                        matched_dept = db.query(models.Depart).filter(models.Depart.depart == c_dept).first()
-                        dept_name = row[2].replace('\n', '')
-                        pdf_classroom = row[9].replace('\n', '') if row[9] else "미지정"
                         lecture = models.Lecture(
                             course_no=c_no,
                             subject=row[4].replace('\n', '') if row[4] else "",
                             department=c_dept,
-                            dept_no=matched_dept.dept_no if matched_dept else None,
+                            dept_no=dept_map.get(c_dept),
                             lec_grade=current_grade,
                             credit=int(row[5]) if row[5] and str(row[5]).isdigit() else 3,
                             professor=c_prof,
                             classroom=c_room,
                             type=type_str,
-                            subject=row[4].replace('\n', ''),
-                            department=dept_name,
-                            dept_no=dept_map.get(dept_name),  # dict 조회 (쿼리 없음)
-                            lec_grade=row[1],
-                            credit=int(row[5]) if row[5].isdigit() else 3,
-                            professor=row[7].replace('\n', '') if row[7] else "미지정",
-                            type=row[0].strip(),
                             capacity=40,
                             version=0
                         )
@@ -962,8 +952,7 @@ async def upload_courses_pdf(file: UploadFile = File(...), db: Session = Depends
                                 end_min=to_mins(end),
                                 start_time=start + ":00",
                                 end_time=end + ":00",
-                                classroom=c_room,
-                                classroom=pdf_classroom
+                                classroom=c_room
                             )
                             db.add(schedule)
                         
