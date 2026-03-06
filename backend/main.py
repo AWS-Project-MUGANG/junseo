@@ -12,6 +12,7 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship, joinedload
 from sqlalchemy.types import Enum as SAEnum
 from sqlalchemy.pool import StaticPool
 import uuid
@@ -369,6 +370,16 @@ def get_lectures(db: Session = Depends(get_db)):
     lectures = db.query(models.Lecture).all()
     # department 이름 → college 역조회 맵 (dept_no 미설정 강의 fallback용)
     dept_college_map = {d.depart: d.college for d in db.query(models.Depart).all()}
+    """강의 목록 전체 조회 (수강신청 화면용) - Eager Loading 최적화"""
+    # N+1 문제 해결: schedules와 depart 정보를 한 번의 쿼리로 Join해서 가져옴
+    lectures = db.query(models.Lecture).options(
+        joinedload(models.Lecture.schedules),
+        joinedload(models.Lecture.depart)
+    ).all()
+
+    # FK가 없는 레거시 데이터 처리를 위한 맵 (필요할 때만 생성)
+    dept_college_map = None
+
     result = []
     for lec in lectures:
         schedules = [
@@ -382,6 +393,18 @@ def get_lectures(db: Session = Depends(get_db)):
         college = lec.depart.college if lec.depart else dept_college_map.get(lec.department)
         # dept_no FK 연결 시 depart_tb의 공식 학과명 사용 (필터 일치를 위해)
         department = lec.depart.depart if lec.depart else lec.department
+        
+        # 1. FK 관계(depart)가 있으면 우선 사용 (가장 빠름)
+        if lec.depart:
+            college = lec.depart.college
+            department = lec.depart.depart
+        else:
+            # 2. FK가 없으면 문자열 매칭 시도 (Lazy Loading for Map)
+            if dept_college_map is None:
+                dept_college_map = {d.depart: d.college for d in db.query(models.Depart).all()}
+            department = lec.department
+            college = dept_college_map.get(department)
+
         result.append({
             "lecture_id": lec.lecture_id,
             "course_no": lec.course_no,
@@ -434,7 +457,14 @@ def get_user_enrollments(user_id: int, db: Session = Depends(get_db)):
 @app.post("/api/v1/enrollments")
 def create_enrollment(req: EnrollmentRequest, db: Session = Depends(get_db)):
     """수강신청 1건 저장 (정원 체크 + 대기열 편입 + 낙관적 락)"""
-    if not is_enrollment_period_active(db):
+    # 새 스케줄 시스템이 설정된 경우 해당 시스템 우선 사용, 없으면 구 SystemConfig 방식
+    schedule_exists = db.query(models.EnrollmentSchedule).filter(
+        models.EnrollmentSchedule.is_active == True
+    ).first()
+    if schedule_exists:
+        if not _get_active_schedule(db):
+            raise HTTPException(status_code=403, detail="현재는 수강신청 기간이 아닙니다.")
+    elif not is_enrollment_period_active(db):
         raise HTTPException(status_code=403, detail="현재는 수강신청 기간이 아닙니다.")
 
     user = db.query(models.User).filter(models.User.user_no == req.user_id).first()
@@ -523,7 +553,13 @@ def create_enrollment(req: EnrollmentRequest, db: Session = Depends(get_db)):
 @app.put("/api/v1/enrollments/{enrollment_id}/confirm")
 def confirm_enrollment(enrollment_id: int, db: Session = Depends(get_db)):
     """수강 장바구니 → 최종 신청 확정"""
-    if not is_enrollment_period_active(db):
+    schedule_exists = db.query(models.EnrollmentSchedule).filter(
+        models.EnrollmentSchedule.is_active == True
+    ).first()
+    if schedule_exists:
+        if not _get_active_schedule(db):
+            raise HTTPException(status_code=403, detail="현재는 수강신청 기간이 아닙니다.")
+    elif not is_enrollment_period_active(db):
         raise HTTPException(status_code=403, detail="현재는 수강신청 기간이 아닙니다.")
 
     en = db.query(models.Enrollment).filter(models.Enrollment.id == enrollment_id).first()

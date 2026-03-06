@@ -129,6 +129,24 @@ async function loadCourseList() {
 function renderSugangList() {
     sugangTbody.innerHTML = '';
     let filtered = courseList;
+
+    // 일차별 수강신청 제한 필터 (어드민 스케줄 기준)
+    if (currentSchedule && userProfile) {
+        const rt = currentSchedule.restriction_type;
+        if (rt === 'own_grade_dept') {
+            // 본인 학년 · 단과대 · 학과만 표시
+            filtered = filtered.filter(i =>
+                i.college === userProfile.college &&
+                i.department === userProfile.depart &&
+                String(i.lec_grade).replace(/[^0-9]/g, '') === String(userProfile.grade)
+            );
+        } else if (rt === 'own_college') {
+            // 본인 단과대 전체(타학과 허용)
+            filtered = filtered.filter(i => i.college === userProfile.college);
+        }
+        // 'all' → 제한 없음, 그대로 진행
+    }
+
     if(activeFilter.college) filtered = filtered.filter(i => i.college === activeFilter.college);
     if(activeFilter.department) filtered = filtered.filter(i => i.department === activeFilter.department);
     if(activeFilter.type) {
@@ -376,31 +394,84 @@ async function loadEnrollments() {
     }
 }
 
-// 수강신청 기간 확인
+// 수강신청 기간 확인 (어드민 스케줄 기준)
 async function checkEnrollmentPeriod() {
+    const RESTRICTION_LABELS = {
+        'own_grade_dept': '본인 학년·단과대·학과 전용',
+        'own_college':    '본인 단과대 (타학과 허용)',
+        'all':            '학교 전체 수강 가능'
+    };
+    const DAY_NAMES = { 0: '예비', 1: '1일차', 2: '2일차', 3: '3일차' };
+
+    const formatKST = (utcStr) => new Date(utcStr).toLocaleString('ko-KR', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+    });
+
     try {
-        const res = await fetch('/api/v1/admin/config/enrollment-period');
-        if(res.ok) {
-            const data = await res.json();
-            const banner = document.getElementById('enrollment-period-banner');
-            const text = document.getElementById('enrollment-period-text');
-            
-            if(data.start && data.end) {
-                isEnrollmentActive = data.is_active;
-                if(banner) banner.style.display = 'block';
-                if(text) {
-                    text.innerText = `${data.start.replace('T',' ')} ~ ${data.end.replace('T',' ')} (${isEnrollmentActive ? '신청 가능 기간' : '신청 기간 아님'})`;
-                    if(!isEnrollmentActive) {
-                        text.style.color = '#c62828';
-                        if(banner) {
-                            banner.style.backgroundColor = '#ffebee';
-                            banner.style.borderColor = '#ffcdd2';
-                        }
-                    }
+        const token = localStorage.getItem('access_token');
+        const res = await fetch('/api/v1/admin/enrollment-schedule', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const schedules = data.schedules || [];
+        const now = new Date();
+
+        const banner = document.getElementById('enrollment-period-banner');
+        const text   = document.getElementById('enrollment-period-text');
+
+        // 현재 진행 중인 일차 탐색
+        const active = schedules.find(s =>
+            s.is_active &&
+            new Date(s.open_datetime) <= now &&
+            now <= new Date(s.close_datetime)
+        );
+
+        if (active) {
+            isEnrollmentActive = true;
+            currentSchedule = active;
+
+            if (banner) {
+                banner.style.display = 'block';
+                banner.style.backgroundColor = '#e8f5e9';
+                banner.style.borderColor = '#a5d6a7';
+            }
+            if (text) {
+                const dayLabel = DAY_NAMES[active.day_number] || `${active.day_number}일차`;
+                const restrictLabel = RESTRICTION_LABELS[active.restriction_type] || active.restriction_type;
+                text.style.color = '#2e7d32';
+                text.innerText = `✅ ${dayLabel} 수강신청 진행 중 | ${restrictLabel} | 마감: ${formatKST(active.close_datetime)}`;
+            }
+        } else {
+            isEnrollmentActive = false;
+            currentSchedule = null;
+
+            // 다음 예정 일차 탐색
+            const next = schedules
+                .filter(s => s.is_active && new Date(s.open_datetime) > now)
+                .sort((a, b) => new Date(a.open_datetime) - new Date(b.open_datetime))[0];
+
+            if (banner) banner.style.display = 'block';
+            if (text) {
+                text.style.color = '#c62828';
+                if (next) {
+                    const dayLabel = DAY_NAMES[next.day_number] || `${next.day_number}일차`;
+                    text.innerText = `⏰ 현재 수강신청 기간이 아닙니다. 다음: ${dayLabel} | 오픈: ${formatKST(next.open_datetime)}`;
+                } else {
+                    text.innerText = '⏳ 현재 수강신청 기간이 아닙니다.';
                 }
             }
+            if (banner) {
+                banner.style.backgroundColor = '#ffebee';
+                banner.style.borderColor = '#ffcdd2';
+            }
         }
-    } catch (e) { console.error(e); }
+
+        // 제한 조건 반영하여 목록 재렌더링
+        renderSugangList();
+    } catch (e) { console.error('수강신청 기간 확인 오류:', e); }
 }
 
 // 통계 데이터 가져오기
@@ -491,6 +562,7 @@ async function loadUserProfile() {
         console.log('[profile] status:', res.status);
         if (res.ok) {
             const data = await res.json();
+            userProfile = data; // 일차별 제한 필터에 사용
             const nameEl = document.querySelector('.student-info .name');
             const idEl = document.querySelector('.student-info .id');
             const collegeEl = document.querySelector('.department-info p:first-child');

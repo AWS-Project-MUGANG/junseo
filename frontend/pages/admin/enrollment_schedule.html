@@ -163,7 +163,7 @@
                     <div class="toggle-row">
                         <span>활성화</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="day1-active" checked>
+                            <input type="checkbox" id="day0-active" checked>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -171,11 +171,11 @@
                 <div class="datetime-grid">
                     <div>
                         <label>🔓 오픈 날짜 / 시간</label>
-                        <input type="datetime-local" id="day1-open">
+                        <input type="datetime-local" id="day0-open">
                     </div>
                     <div>
                         <label>🔒 마감 날짜 / 시간</label>
-                        <input type="datetime-local" id="day1-close">
+                        <input type="datetime-local" id="day0-close">
                     </div>
                 </div>
                 <div class="info-box">
@@ -403,6 +403,8 @@ function updateStatusBanner(schedules) {
     const banner = document.getElementById('status-banner');
     const text   = document.getElementById('status-text');
     const now    = new Date();
+    const DAY_LABELS = { 0: '예비', 1: '1일차', 2: '2일차', 3: '3일차' };
+    const label = (n) => DAY_LABELS[n] ?? `${n}일차`;
 
     const active = schedules.find(s => {
         if (!s.is_active) return false;
@@ -411,7 +413,7 @@ function updateStatusBanner(schedules) {
 
     if (active) {
         banner.className = 'status-banner status-active';
-        text.textContent = `✅ 현재 ${active.day_number}일차 수강신청 진행 중 | 마감: ${formatKST(active.close_datetime)}`;
+        text.textContent = `✅ 현재 ${label(active.day_number)} 수강신청 진행 중 | 마감: ${formatKST(active.close_datetime)}`;
         return;
     }
 
@@ -421,7 +423,7 @@ function updateStatusBanner(schedules) {
 
     if (next) {
         banner.className = 'status-banner status-upcoming';
-        text.textContent = `⏰ 다음 수강신청: ${next.day_number}일차 | 오픈: ${formatKST(next.open_datetime)}`;
+        text.textContent = `⏰ 다음 수강신청: ${label(next.day_number)} | 오픈: ${formatKST(next.open_datetime)}`;
     } else {
         banner.className = 'status-banner status-inactive';
         text.textContent = '⏳ 현재 수강신청 비활성 상태입니다. 일정을 설정해 주세요.';
@@ -434,9 +436,10 @@ function renderTable(schedules) {
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#aaa;padding:20px;">저장된 일정 없음</td></tr>`;
         return;
     }
+    const DAY_LABELS = { 0: '예비', 1: '1일차', 2: '2일차', 3: '3일차' };
     tbody.innerHTML = schedules.map(s => `
         <tr>
-            <td><strong>${s.day_number}일차</strong></td>
+            <td><strong>${DAY_LABELS[s.day_number] ?? s.day_number + '일차'}</strong></td>
             <td>${RESTRICTION_LABELS[s.restriction_type] || s.restriction_type}</td>
             <td>${formatKST(s.open_datetime)}</td>
             <td>${formatKST(s.close_datetime)}</td>
@@ -448,26 +451,28 @@ function renderTable(schedules) {
 // ---- 저장 ----
 async function saveSchedule() {
     const DAY_RESTRICTIONS = {
+        0: 'all',
         1: 'own_grade_dept',
         2: 'own_college',
         3: 'all'
     };
+    const DAY_LABELS = { 0: '예비', 1: '1일차', 2: '2일차', 3: '3일차' };
 
     // 유효성 검사
-    for (let n = 1; n <= 3; n++) {
+    for (let n = 0; n <= 3; n++) {
         const open  = document.getElementById(`day${n}-open`).value;
         const close = document.getElementById(`day${n}-close`).value;
         if (!open || !close) {
-            alert(`${n}일차의 오픈/마감 날짜·시간을 모두 입력해 주세요.`);
+            alert(`${DAY_LABELS[n]} 수강신청의 오픈/마감 날짜·시간을 모두 입력해 주세요.`);
             return;
         }
         if (new Date(open) >= new Date(close)) {
-            alert(`${n}일차: 마감 시간이 오픈 시간보다 늦어야 합니다.`);
+            alert(`${DAY_LABELS[n]}: 마감 시간이 오픈 시간보다 늦어야 합니다.`);
             return;
         }
     }
 
-    const schedules = [1, 2, 3].map(n => ({
+    const schedules = [0, 1, 2, 3].map(n => ({
         day_number:       n,
         open_datetime:    localInputToUTC(document.getElementById(`day${n}-open`).value),
         close_datetime:   localInputToUTC(document.getElementById(`day${n}-close`).value),
