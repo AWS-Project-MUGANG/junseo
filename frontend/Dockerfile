@@ -11,13 +11,10 @@ COPY . /usr/share/nginx/html/
 RUN echo 'server { \
     listen 80; \
     root /usr/share/nginx/html; \
-    # 정적 파일 우선 확인, 없으면 404
+    absolute_redirect off; \
+    # 정적 파일 우선 확인, 없으면 404 \
     location / { \
         try_files $uri $uri/ =404; \
-    } \
-    # 루트 접속 시 로그인 페이지로 명시적 리다이렉트
-    location = / { \
-        return 301 /pages/auth/login.html; \
     } \
     location /api { \
         proxy_pass http://backend:8000; \

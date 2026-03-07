@@ -562,6 +562,7 @@ async function loadNotices() {
         if(res.ok) {
             const data = await res.json();
             const listDiv = document.getElementById('student-notice-list');
+            if(!listDiv) return;
             listDiv.innerHTML = '';
             data.notices.forEach(n => {
                 const p = document.createElement('p');

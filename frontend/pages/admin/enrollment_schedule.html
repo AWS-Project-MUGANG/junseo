@@ -130,9 +130,9 @@
         </div>
         <nav class="sidebar-nav">
             <button class="nav-item active" onclick="location.href='enrollment_schedule.html'">수강신청 기간 설정</button>
-            <!-- <button class="nav-item" onclick="location.href='dashboard.html'">대시보드 홈</button> -->
-            <button class="nav-item" onclick="location.href='course_management.html'">수업 개설 관리</button>
-            <button class="nav-item" onclick="location.href='rag_update.html'">학사 규정 AI 업데이트</button>
+            <button class="nav-item" onclick="location.href='course_management.html'">개설 관리</button>
+            <button class="nav-item" onclick="location.href='rag_update.html'">AI 학사 규정</button>
+            <button class="nav-item" onclick="location.href='server_management.html'">서버 관리</button>
             <button class="nav-item logout-btn" onclick="logout()">로그아웃</button>
         </nav>
     </aside>
@@ -464,25 +464,33 @@ async function saveSchedule() {
 
     // 유효성 검사
     for (let n = 0; n <= 3; n++) {
+        const isActive = document.getElementById(`day${n}-active`).checked;
         const open  = document.getElementById(`day${n}-open`).value;
         const close = document.getElementById(`day${n}-close`).value;
-        if (!open || !close) {
-            alert(`${DAY_LABELS[n]} 수강신청의 오픈/마감 날짜·시간을 모두 입력해 주세요.`);
-            return;
-        }
-        if (new Date(open) >= new Date(close)) {
-            alert(`${DAY_LABELS[n]}: 마감 시간이 오픈 시간보다 늦어야 합니다.`);
-            return;
+
+        if (isActive) {
+            if (!open || !close) {
+                alert(`${DAY_LABELS[n]} 수강신청이 활성화되어 있습니다. 오픈/마감 날짜·시간을 모두 입력해 주세요.`);
+                return;
+            }
+            if (new Date(open) >= new Date(close)) {
+                alert(`${DAY_LABELS[n]}: 마감 시간이 오픈 시간보다 늦어야 합니다.`);
+                return;
+            }
         }
     }
 
-    const schedules = [0, 1, 2, 3].map(n => ({
-        day_number:       n,
-        open_datetime:    localInputToUTC(document.getElementById(`day${n}-open`).value),
-        close_datetime:   localInputToUTC(document.getElementById(`day${n}-close`).value),
-        restriction_type: DAY_RESTRICTIONS[n],
-        is_active:        document.getElementById(`day${n}-active`).checked
-    }));
+    const schedules = [0, 1, 2, 3].map(n => {
+        const openVal = document.getElementById(`day${n}-open`).value;
+        const closeVal = document.getElementById(`day${n}-close`).value;
+        return {
+            day_number:       n,
+            open_datetime:    openVal ? localInputToUTC(openVal) : null,
+            close_datetime:   closeVal ? localInputToUTC(closeVal) : null,
+            restriction_type: DAY_RESTRICTIONS[n],
+            is_active:        document.getElementById(`day${n}-active`).checked
+        };
+    });
 
     try {
         const res = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`, {

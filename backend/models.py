@@ -35,9 +35,6 @@ class User(Base):
     depart = relationship("Depart")
 
 
-
-
-
 class Lecture(Base):
     __tablename__ = "lecture_tb"
 
@@ -54,6 +51,7 @@ class Lecture(Base):
     count = Column(Integer, default=0)
     waitlist_capacity = Column(Integer, default=10) # 큐 정원
     version = Column(Integer, default=0)
+    classroom = Column(String(100)) # 강의실
 
     depart = relationship("Depart")
     schedules = relationship("ScheduleTb", back_populates="lecture", cascade="all, delete-orphan")
@@ -75,9 +73,6 @@ class ScheduleTb(Base):
     lecture = relationship("Lecture", back_populates="schedules")
 
 
-
-
-
 class Enrollment(Base):
     __tablename__ = "enroll_tb"
 
@@ -91,6 +86,21 @@ class Enrollment(Base):
 
     lecture = relationship("Lecture", back_populates="enrollments")
     user = relationship("User", foreign_keys=[user_id])
+
+
+class Grade(Base):
+    """학생용 성적/이수 정보 테이블"""
+    __tablename__ = "grade_tb"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("user_tb.user_no", ondelete="CASCADE"), index=True)
+    enrollment_id = Column(BigInteger, ForeignKey("enroll_tb.enroll_no", ondelete="CASCADE"), index=True)
+    grade_letter = Column(String(5))  # A+, A0, ...
+    semester = Column(String(20))    # 2024-1, ...
+    is_retake = Column(Boolean, default=False)
+
+    user = relationship("User")
+    enrollment = relationship("Enrollment")
 
 
 class Notice(Base):
@@ -140,9 +150,8 @@ class EnrollmentSchedule(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     day_number = Column(Integer, nullable=False)          # 1, 2, 3
-    open_datetime = Column(DateTime, nullable=False)      # 오픈 일시 (UTC)
-    close_datetime = Column(DateTime, nullable=False)     # 마감 일시 (UTC)
+    open_datetime = Column(DateTime, nullable=True)      # 오픈 일시 (UTC)
+    close_datetime = Column(DateTime, nullable=True)     # 마감 일시 (UTC)
     restriction_type = Column(String(30), nullable=False) # 'own_grade_dept' | 'own_college' | 'all'
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
