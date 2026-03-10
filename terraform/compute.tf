@@ -1,30 +1,66 @@
 # --------------------------------------------------------------------------------------------------
-# 컴퓨트 (EKS Managed Node Group)
-# --------------------------------------------------------------------------------------------------
-# 인프라 분석서의 요구사항에 따라 EKS 워커 노드를 생성합니다.
-# t3.medium 인스턴스 타입을 사용하며, Private Subnet에 배치됩니다.
-# 이 설정은 eks.tf 파일의 EKS 모듈에 전달되어 사용될 수 있습니다.
+# 컴퓨팅 및 로드밸런싱 (EC2 + ALB)
 # --------------------------------------------------------------------------------------------------
 
-module "eks" {
-  source = "terraform-aws-modules/eks/aws"
-  # ... 기존 eks.tf에 정의된 클러스터 설정 ...
+# 1. Application Load Balancer (트래픽 몰림 방지)
+resource "aws_lb" "main" {
+  name               = "mugang-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = module.vpc.public_subnets
+}
 
-  eks_managed_node_groups = {
-    mugang_nodegroup = {
-      name           = "mugang-general-nodegroup"
-      instance_types = ["t3.medium"] # 인프라 분석서 기준
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
 
-      min_size     = 2 # 최소 노드 수
-      max_size     = 4 # 최대 노드 수 (Auto Scaling)
-      desired_size = 2
-
-      vpc_security_group_ids = [aws_security_group.eks_nodes_sg.id]
-      subnet_ids             = module.vpc.private_subnets
-
-      tags = {
-        Name = "mugang-eks-nodegroup"
-      }
-    }
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app.arn
   }
+}
+
+resource "aws_lb_target_group" "app" {
+  name        = "mugang-app-tg"
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
+  target_type = "instance"
+}
+
+# 2. Application Server (Private Subnet, 보안 강화)
+resource "aws_instance" "app_server" {
+  ami                    = "ami-0c9c942bd7bf113a2" # Amazon Linux 2023 (ap-northeast-2)
+  instance_type          = "t3.medium"
+  subnet_id              = module.vpc.private_subnets[0]
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  tags = { Name = "mugang-app-server" }
+}
+
+resource "aws_lb_target_group_attachment" "app_attach" {
+  target_group_arn = aws_lb_target_group.app.arn
+  target_id        = aws_instance.app_server.id
+  port             = 8000
+}
+
+# 3. IAM Role (EC2가 DynamoDB/ECR 등에 접근하기 위함)
+resource "aws_iam_role" "ec2_role" {
+  name = "mugang_ec2_role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "mugang_ec2_profile"
+  role = aws_iam_role.ec2_role.name
 }

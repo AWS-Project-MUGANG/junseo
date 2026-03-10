@@ -7,31 +7,46 @@
 # 3. RDS (Database): EKS 노드에서만 접근 허용
 # --------------------------------------------------------------------------------------------------
 
-# EKS 클러스터의 워커 노드를 위한 보안 그룹
-resource "aws_security_group" "eks_nodes_sg" {
-  name        = "mugang-eks-nodes-sg"
-  description = "Security group for EKS worker nodes"
+# 1. ALB Security Group (Public)
+resource "aws_security_group" "alb_sg" {
+  name        = "mugang-alb-sg"
+  description = "Allow HTTP inbound traffic"
   vpc_id      = module.vpc.vpc_id
 
-  # 노드 간 모든 통신 허용
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
-    description = "Allow all traffic between nodes"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # 외부로 나가는 모든 트래픽 허용
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
 
-  tags = {
-    Name = "mugang-eks-nodes-sg"
+# 2. App Server Security Group (Private)
+resource "aws_security_group" "app_sg" {
+  name        = "mugang-app-sg"
+  description = "Security group for App Server"
+  vpc_id      = module.vpc.vpc_id
+
+  # ALB에서 오는 트래픽만 허용
+  ingress {
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
@@ -46,8 +61,8 @@ resource "aws_security_group" "rds_sg" {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.eks_nodes_sg.id]
-    description     = "Allow PostgreSQL traffic from EKS nodes"
+    security_groups = [aws_security_group.app_sg.id]
+    description     = "Allow PostgreSQL traffic from App Server"
   }
 
   # 외부로 나가는 모든 트래픽 허용

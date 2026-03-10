@@ -21,40 +21,30 @@
 
 ### 2. 전체 아키텍처 및 네트워크 격리 전략 (1분 30초)
 - **아키텍처 구조 (Architecture)**:
+![alt text](image-1.png)
 ```mermaid
-graph TD
-    User((User)) -->|HTTPS| ALB
+graph TD;
+    User((User)) -->|HTTP/80| ALB;
     
     subgraph AWS_Cloud [AWS Cloud]
         subgraph VPC [VPC]
             subgraph Public_Subnet [Public Subnet]
-                ALB[ALB]
-                NAT[NAT Gateway]
-                Bastion[Bastion Host]
+                ALB[Application Load Balancer];
+                NAT[NAT Gateway];
             end
-            
+
             subgraph Private_Subnet [Private Subnet]
-                subgraph EKS [EKS Cluster]
-                    FE[Frontend Pod]
-                    BE[Backend Pod]
-                end
-                RDS[(Aurora PostgreSQL)]
+                EC2[EC2 App Server];
+                RDS[(RDS PostgreSQL)];
             end
         end
-        
-        S3[S3 Bucket]
-        Lambda[AWS Lambda]
-        Bedrock[Amazon Bedrock]
+        DynamoDB[(DynamoDB)];
     end
     
-    ALB -->|Route| FE
-    FE -->|API| BE
-    BE -->|SQL| RDS
-    BE -->|Upload| S3
-    S3 -->|Trigger| Lambda
-    Lambda -->|Inference| Bedrock
-    
-    BE -.->|Outbound| NAT
+    ALB -->|Port 8000| EC2;
+    EC2 -->|SQL| RDS;
+    EC2 -->|API Call| DynamoDB;
+    EC2 -->|Outbound| NAT;
 ```
   - **트래픽 흐름**: 사용자 -> ALB(Public) -> EKS(Private) -> RDS(Private)로 이어지는 보안 중심의 3-Tier 구조입니다.
   - **AI 파이프라인**: S3 업로드 이벤트가 Lambda를 트리거하고, Bedrock이 추론하는 **이벤트 기반 아키텍처**를 적용했습니다.

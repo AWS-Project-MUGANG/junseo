@@ -17,7 +17,7 @@
 
 ### 1️⃣ 네트워크 (Network) - 트래픽 진입로 및 망 격리
 1.  **VPC (Virtual Private Cloud)**: 전체 클라우드 리소스를 담는 논리적 격리 네트워크.
-2.  **Subnets (Public / Private)**: 외부 연결이 필요한 로드밸런서(Public)와, 숨겨야 하는 DB/컨테이너(Private) 망 분리.
+2.  **Subnets (Public Only)**: 리소스 최소화 및 NAT Gateway 비용 절감을 위해 Public Subnet 단일 구성.
 3.  **IGW (Internet Gateway)**: 퍼블릭 서브넷과 외부 인터넷 통신 지원.
 4.  **ALB (Application Load Balancer)**: 사용자 트래픽을 프론트엔드 컨테이너로 안전하고 고르게 분산하는 관문.
 
@@ -27,7 +27,7 @@
 6.  **EC2 (Ubuntu, `t3.medium`)**: 백엔드와 프론트엔드 도커 컨테이너가 실제로 구동되는 핵심 서버. 스팟 인스턴스(Spot)를 활용하여 비용 절감.
 
 ### 3️⃣ 데이터베이스 (Database & Security)
-7.  **RDS (PostgreSQL, `db.t3.micro`)**: 애플리케이션 데이터(회원, 수강, 예약 등) 저장. 퍼블릭 접근을 완전히 차단하고, 백엔드 컨테이너에서만 접근 가능한 **프라이빗 서브넷**에 배치. (프리티어 적극 활용)
+7.  **RDS (PostgreSQL, `db.t3.micro`)**: 애플리케이션 데이터(회원, 수강, 예약 등) 저장. 보안 그룹(Security Group)을 통해 백엔드 컨테이너에서만 접근 가능하도록 제어.
 
 ### 4️⃣ 스토리지 (Storage) - AI RAG 문서 관리
 8.  **S3 (사전서명된 URL 활용)**: 사용자가 강의자료(PDF) 등을 업로드할 때, 컨테이너 서버의 부하를 막기 위해 S3로 직접(Direct Upload) 전송 및 저장.

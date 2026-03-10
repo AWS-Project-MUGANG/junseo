@@ -1,25 +1,25 @@
-# VPC 모듈 사용 (AWS 공식 테라폼 모듈)
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.0.0"
 
-  name = "mugang-ai-vpc"
+  name = "mugang-vpc"
   cidr = "10.0.0.0/16"
 
-  # 가용 영역 분산
-  azs             = ["ap-northeast-2a", "ap-northeast-2c"]
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24"] # EKS 노드 및 RDS 위치
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"] # 로드밸런서(ALB) 위치
+  # 리소스 개수 최적화(20~23개)를 위해 1개 AZ만 사용
+  azs             = ["ap-northeast-2a"]
+  private_subnets = ["10.0.2.0/24"] # 보안 영역 (EC2, RDS)
+  public_subnets  = ["10.0.1.0/24"] # 외부 연결 (ALB, NAT)
 
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
+  # 보안 안정화를 위한 NAT Gateway 활성화
+  enable_nat_gateway = true
+  single_nat_gateway = true
+  enable_vpn_gateway = false
+
   enable_dns_hostnames = true
+  enable_dns_support   = true
 
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = 1
-  }
-
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
+  tags = {
+    Environment = "dev"
+    Project     = "mugang-university"
   }
 }

@@ -10,22 +10,17 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
-output "eks_cluster_name" {
-  description = "The name of the EKS cluster"
-  value       = module.eks.cluster_name
+output "alb_dns_name" {
+  description = "The DNS name of the load balancer"
+  value       = aws_lb.main.dns_name
 }
 
-output "eks_cluster_endpoint" {
-  description = "The endpoint for the EKS cluster"
-  value       = module.eks.cluster_endpoint
+output "dynamodb_table_name" {
+  description = "The name of the DynamoDB table"
+  value       = aws_dynamodb_table.chat_history.name
 }
 
-output "rds_cluster_endpoint" {
-  description = "The writer endpoint for the RDS cluster"
-  value       = aws_rds_cluster.mugang_db_cluster.endpoint
-}
-
-output "rds_cluster_port" {
-  description = "The port for the RDS cluster"
-  value       = aws_rds_cluster.mugang_db_cluster.port
+output "rds_endpoint" {
+  description = "The endpoint for the RDS instance"
+  value       = aws_db_instance.postgres_db.address
 }
