@@ -18,6 +18,15 @@ resource "aws_subnet" "public_sub" {
   availability_zone       = "ap-northeast-2a"
 }
 
+# eks말고 도커 + alb + ec2 + rds 사용버전 / Public Subnet 2 (ALB 구성을 위해 최소 2개 AZ 필요)
+# resource "aws_subnet" "public_sub_2" {
+#   vpc_id                  = aws_vpc.mugang_vpc.id
+#   cidr_block              = "10.0.10.0/24"
+#   map_public_ip_on_launch = true
+#   availability_zone       = "ap-northeast-2c"
+#   tags = { Name = "mugang-public-sub-2" }
+# }
+
 # Private Subnet (RDS용 - 최소 2개 필요)
 resource "aws_subnet" "private_sub_1" {
   vpc_id            = aws_vpc.mugang_vpc.id
@@ -49,6 +58,11 @@ resource "aws_route_table_association" "public_assoc" {
   route_table_id = aws_route_table.public_rt.id
 }
 
+resource "aws_route_table_association" "public_assoc_2" {
+  subnet_id      = aws_subnet.public_sub_2.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
 # 3. 보안 그룹 (Security Groups)
 
 # Bastion SG: 모든 IP에서 SSH(22) 허용
@@ -71,6 +85,54 @@ resource "aws_security_group" "bastion_sg" {
   }
 }
 
+# ALB SG: 웹 트래픽 허용
+resource "aws_security_group" "alb_sg" {
+  name   = "mugang-alb-sg"
+  vpc_id = aws_vpc.mugang_vpc.id
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# App Server SG: ALB 및 Bastion 허용
+resource "aws_security_group" "app_sg" {
+  name   = "mugang-app-sg"
+  vpc_id = aws_vpc.mugang_vpc.id
+
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
+  ingress {
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # RDS SG: Bastion SG로부터만 5432 허용 (실무 권장 방식)
 resource "aws_security_group" "rds_sg" {
   name   = "rds-sg"
@@ -80,7 +142,7 @@ resource "aws_security_group" "rds_sg" {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.bastion_sg.id]
+    security_groups = [aws_security_group.bastion_sg.id, aws_security_group.app_sg.id]
   }
 }
 
@@ -106,6 +168,17 @@ resource "aws_instance" "bastion" {
   tags = { Name = "mugang-bastion" }
 }
 
+# 4-1. App Server (EC2 + Docker) 생성
+resource "aws_instance" "app_server" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t3.medium"             # MSA 컨테이너 구동용
+  subnet_id              = aws_subnet.private_sub_1.id
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
+  key_name               = var.key_name
+
+  tags = { Name = "mugang-app-server" }
+}
+
 # 5. RDS (PostgreSQL) 생성
 resource "aws_db_subnet_group" "rds_sub_group" {
   name       = "mugang-rds-sub-group"
@@ -128,6 +201,52 @@ resource "aws_db_instance" "postgres_db" {
   tags = { Name = "mugang-rds" }
 }
 
+# 6. ECR & S3 & ALB (추가 리소스)
+
+resource "aws_ecr_repository" "frontend" {
+  name = "mugang-frontend"
+}
+
+resource "aws_ecr_repository" "backend" {
+  name = "mugang-backend"
+}
+
+resource "aws_s3_bucket" "files" {
+  bucket_prefix = "mugang-files-"
+}
+
+resource "aws_lb" "main" {
+  name               = "mugang-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = [aws_subnet.public_sub.id, aws_subnet.public_sub_2.id]
+}
+
+resource "aws_lb_target_group" "app_tg" {
+  name     = "mugang-app-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.mugang_vpc.id
+}
+
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg.arn
+  }
+}
+
+resource "aws_lb_target_group_attachment" "app_attach" {
+  target_group_arn = aws_lb_target_group.app_tg.arn
+  target_id        = aws_instance.app_server.id
+  port             = 80
+}
+
 # 출력 설정 (생성 후 접속 주소 확인용)
 output "bastion_public_ip" {
   value = aws_instance.bastion.public_ip
@@ -141,4 +260,9 @@ output "rds_address" {
 output "rds_port" {
   description = "DBeaver Port란에 입력할 포트"
   value       = aws_db_instance.postgres_db.port
+}
+
+output "alb_dns_name" {
+  description = "웹 서비스 접속 주소"
+  value       = aws_lb.main.dns_name
 }
