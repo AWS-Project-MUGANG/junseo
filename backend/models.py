@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from database import Base
 
 
@@ -168,3 +169,14 @@ class EnrollmentSchedule(Base):
     restriction_type = Column(String(30), nullable=False) # 'own_grade_dept' | 'own_college' | 'all'
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RagDocument(Base):
+    """RAG 검색용 간이 문서 저장 테이블 (증적용)"""
+    __tablename__ = "rag_docs_tb"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), nullable=False)
+    content = Column(String, nullable=False)  # 텍스트 원본 (긴 글)
+    embedding = Column(Vector(1536))  # AWS Bedrock Titan Embeddings v1 (1536차원)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -74,6 +74,13 @@
   <script>
     (async () => {
       const userId = localStorage.getItem('user_no');
+
+      if (!userId || userId === 'null' || userId === 'undefined') {
+        alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+        window.location.replace('../auth/login.html');
+        return;
+      }
+
       try {
         const res = await fetch(`/api/v1/users/${userId}`);
         if (res.ok) {

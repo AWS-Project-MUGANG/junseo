@@ -10,3 +10,7 @@ pydantic-settings
 pdfplumber
 cryptography
 bcrypt
+pgvector
+boto3
+pdfplumber
+

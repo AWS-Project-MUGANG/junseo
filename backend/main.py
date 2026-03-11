@@ -12,8 +12,6 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger, text
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger, func, text
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship, joinedload, selectinload, Session
 from sqlalchemy.types import Enum as SAEnum
@@ -25,6 +23,7 @@ import io
 import pdfplumber
 import re
 import tempfile
+import boto3
 
 # DB 연동
 from database import engine, get_db, Base
@@ -57,6 +56,9 @@ def ensure_schema_compatibility():
     """Legacy DB schema와 현재 ORM 모델 간의 최소 호환성 보정."""
     try:
         with engine.begin() as conn:
+            # pgvector 확장 활성화 (벡터 검색 필수)
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            
             # user_tb: 구 스키마에 없을 수 있는 컬럼
             conn.execute(text("ALTER TABLE user_tb ADD COLUMN IF NOT EXISTS email VARCHAR(150)"))
             conn.execute(text("ALTER TABLE user_tb ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
@@ -72,7 +74,11 @@ def ensure_schema_compatibility():
 
 # 시작 시 DB 스키마 보정 + 테이블 생성 (개발용)
 ensure_schema_compatibility()
-models.Base.metadata.create_all(bind=engine)
+try:
+    models.Base.metadata.create_all(bind=engine)
+except Exception as e:
+    # pgvector 확장이 설치되지 않은 DB일 경우 테이블 생성 실패로 서버가 죽는 것을 방지
+    logger.error(f"테이블 생성 중 오류 발생 (DB 확장 기능 확인 필요): {e}")
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -248,6 +254,26 @@ def _check_enrollment_access(user: models.User, lecture_id: int, db: Session) ->
 
     return {"allowed": True, "reason": "허용", "active_day": active.day_number}
 
+
+# ---- AI/ML 헬퍼 함수 (Bedrock) ----
+def get_embedding(text: str) -> List[float]:
+    """AWS Bedrock Titan 모델을 사용하여 텍스트 임베딩 생성 (1536차원)"""
+    try:
+        # 리전은 서울(ap-northeast-2) 또는 버지니아(us-east-1) 사용
+        bedrock = boto3.client(service_name='bedrock-runtime', region_name='us-east-1')
+        
+        body = json.dumps({"inputText": text})
+        response = bedrock.invoke_model(
+            modelId="amazon.titan-embed-text-v1",
+            contentType="application/json",
+            accept="application/json",
+            body=body
+        )
+        response_body = json.loads(response.get("body").read())
+        return response_body.get("embedding")
+    except Exception as e:
+        logger.error(f"Bedrock Embedding Error: {e}")
+        return []
 
 # ---- API 라우터 ----
 
@@ -1275,7 +1301,22 @@ def chat_ask(req: ChatRequest, db: Session = Depends(get_db)):
         reply_text = "졸업을 위해서는 130학점 이상 이수와 필수 전공/교양 과목을 모두 들어야 하며, 졸업 논문 혹은 대체 자격증(토익 800점 등)을 제출하셔야 합니다."
         source_info = [{"title": "총칙: 졸업 요건 규정", "url": "#graduation"}]
     else:
-        reply_text = f"말씀하신 '{req.message}' 에 대한 구체적인 문서를 찾고 있습니다. (RAG 연동 전 테스트 응답)"
+        # 벡터 검색 (Vector Search) 수행
+        query_vector = get_embedding(user_msg)
+        rag_docs = []
+        
+        if query_vector:
+            # L2 거리(유클리드 거리)가 가까운 순서대로 상위 3개 조회
+            rag_docs = db.query(models.RagDocument).order_by(
+                models.RagDocument.embedding.l2_distance(query_vector)
+            ).limit(3).all()
+
+        if rag_docs:
+            doc = rag_docs[0] # 가장 유사한 문서
+            reply_text = f"[AI 검색 결과] 관련 규정('{doc.title}')을 찾았습니다:\n\n{doc.content[:200]}...\n\n(더 자세한 내용은 학사 공지를 참고하세요)"
+            source_info = [{"title": d.title, "url": "#rag"} for d in rag_docs]
+        else:
+            reply_text = "죄송합니다. 질문하신 내용과 관련된 학사 규정을 찾을 수 없습니다."
 
     db.add(models.ChatMessage(session_id=req.session_id, role="assistant", content=reply_text))
     db.commit()
@@ -1349,29 +1390,36 @@ async def upload_rag_document(
             
             try:
                 with pdfplumber.open(tmp_path) as pdf:
-                    content = "\n".join([page.extract_text() or "" for page in pdf.pages])
                     page_contents = []
-                    for page in pdf.pages:
-                        text = page.extract_text() or ""
-                        
-                        # 표(Table) 추출 후 마크다운 포맷으로 변환
-                        tables = page.extract_tables()
-                        if tables:
-                            text += "\n\n[표 데이터 구조화]\n"
-                            for table in tables:
-                                if not table: continue
-                                # None 값 처리 및 줄바꿈 제거 (한 줄로 평탄화)
-                                clean_table = [[str(cell).replace('\n', '<br>') if cell is not None else "" for cell in row] for row in table]
-                                if not clean_table: continue
-                                
-                                # 첫 번째 행을 헤더로 사용
-                                headers = clean_table[0]
-                                md = "| " + " | ".join(headers) + " |\n"
-                                md += "| " + " | ".join(["---"] * len(headers)) + " |\n"
-                                for row in clean_table[1:]:
-                                    md += "| " + " | ".join(row) + " |\n"
-                                text += md + "\n"
-                        page_contents.append(text)
+                    for i, page in enumerate(pdf.pages, 1):
+                        try:
+                            text = page.extract_text() or ""
+                            
+                            # 표(Table) 추출 후 마크다운 포맷으로 변환
+                            tables = page.extract_tables()
+                            if tables:
+                                text += "\n\n[표 데이터 구조화]\n"
+                                for j, table in enumerate(tables, 1):
+                                    try:
+                                        if not table: continue
+                                        # None 값 처리 및 줄바꿈 제거 (한 줄로 평탄화)
+                                        clean_table = [[str(cell).replace('\n', '<br>') if cell is not None else "" for cell in row] for row in table]
+                                        if not clean_table or not clean_table[0]: continue
+                                        
+                                        # 첫 번째 행을 헤더로 사용
+                                        headers = clean_table[0]
+                                        md = "| " + " | ".join(headers) + " |\n"
+                                        md += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+                                        for row in clean_table[1:]:
+                                            md += "| " + " | ".join(row) + " |\n"
+                                        text += md + "\n"
+                                    except Exception as table_e:
+                                        logger.warning(f"PDF '{file.filename}'의 Page {i}, Table {j} 처리 중 오류: {table_e}")
+                                        continue # 테이블 처리 실패 시 다음 테이블로
+                            page_contents.append(text)
+                        except Exception as page_e:
+                            logger.warning(f"PDF '{file.filename}'의 Page {i} 처리 중 오류: {page_e}")
+                            continue # 페이지 처리 실패 시 다음 페이지로
                     content = "\n\n".join(page_contents)
             finally:
                 if os.path.exists(tmp_path):
@@ -1396,16 +1444,21 @@ async def upload_rag_document(
         if current_chunk:
             chunks.append(current_chunk.strip())
 
-        # 3. 메타데이터 저장 (실제 서비스에서는 여기서 Vector DB로 전송)
-        new_doc = models.DocumentMetadata(
-            doc_type="rag_knowledge",
-            title=title,
-            source_url=f"file://{file.filename} (Chunks: {len(chunks)})"
-        )
-        db.add(new_doc)
+        # 3. 각 청크별 임베딩 생성 및 DB 저장 (Vector DB 역할)
+        for i, chunk in enumerate(chunks):
+            if not chunk.strip(): continue
+            vector = get_embedding(chunk)
+            if vector:
+                new_doc = models.RagDocument(
+                    title=f"{title} (Part {i+1})",
+                    content=chunk,
+                    embedding=vector
+                )
+                db.add(new_doc)
+        
         db.commit()
 
-        return {"message": f"'{title}' 파일이 업로드되었으며, {len(chunks)}개의 청크(Chunk)로 분리되어 학습되었습니다."}
+        return {"message": f"'{title}' 문서가 {len(chunks)}개의 청크로 분할되어 벡터 데이터베이스에 저장되었습니다."}
     except Exception as e:
         logger.error(f"RAG Upload Failed: {e}")
         raise HTTPException(status_code=500, detail="문서 처리 중 오류가 발생했습니다.")
@@ -1418,12 +1471,10 @@ def create_notice(req: NoticeRequest, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "공지가 등록되었습니다."}
 
-
 @app.get("/api/v1/notices")
 def get_notices(db: Session = Depends(get_db)):
     notices = db.query(models.Notice).order_by(models.Notice.created_at.desc()).all()
     return {"notices": notices}
-
 
 # --- 성적 ---
 @app.post("/api/v1/admin/grades")
