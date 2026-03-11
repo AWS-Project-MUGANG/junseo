@@ -22,6 +22,7 @@ let isEnrollmentActive = false;
 
 // 현재 진행 중인 수강신청 스케줄 (null이면 기간 아님)
 let currentSchedule = null;
+const MAX_ENROLL_CREDITS = 25;
 
 // 로그인한 학생 프로필 (일차별 제한 필터에 사용)
 let userProfile = null;
@@ -363,6 +364,18 @@ window.addToCart = async function(id) {
     const item = courseList.find(c => String(c.id) === String(id));
     if (!item) return;
 
+    const currentTotalCredits = cartData.reduce((sum, c) => {
+        if (c.enroll_status !== 'BASKET' && c.enroll_status !== 'COMPLETED') return sum;
+        const credit = Number(c.credits ?? c.credit ?? 0);
+        return sum + (Number.isFinite(credit) ? credit : 0);
+    }, 0);
+    const nextCredit = Number(item.credit ?? 0);
+    const nextTotalCredits = currentTotalCredits + (Number.isFinite(nextCredit) ? nextCredit : 0);
+    if (nextTotalCredits > MAX_ENROLL_CREDITS) {
+        alert(`최대 신청 가능 학점(${MAX_ENROLL_CREDITS})을 초과합니다.\n현재 ${currentTotalCredits}학점`);
+        return;
+    }
+
     const exists = cartData.find(c => c.lecture_id === item.id);
     if (exists) {
         alert("이미 수강신청(DB 저장)이 완료된 과목입니다.");
@@ -448,6 +461,7 @@ async function loadEnrollments() {
             renderCart();
             renderTimetable();
             renderSugangList(); // 신청완료 버튼 상태 동기화
+            updateStatsFromCart();
         }
     } catch (error) {
         console.error('Load enrollments error:', error);
@@ -547,21 +561,22 @@ async function checkEnrollmentPeriod() {
     } catch (e) { console.error('수강신청 기간 확인 오류:', e); }
 }
 
+function updateStatsFromCart() {
+    const statTotal = document.getElementById('stat-total');
+    const statReq = document.getElementById('stat-req');
+
+    const totalCredits = cartData.reduce((sum, item) => {
+        const credit = Number(item.credits ?? item.credit ?? 0);
+        return sum + (Number.isFinite(credit) ? credit : 0);
+    }, 0);
+
+    if (statTotal) statTotal.innerText = String(totalCredits);
+    if (statReq) statReq.innerText = '25';
+}
+
 // 통계 데이터 가져오기
 async function loadStats() {
-    if (!userId) return;
-    try {
-        const res = await fetch(`/api/v1/student/${userId}/stats`);
-        if(res.ok) {
-            const data = await res.json();
-            const statTotal = document.getElementById('stat-total');
-            const statReq = document.getElementById('stat-req');
-            const statGpa = document.getElementById('stat-gpa');
-            if(statTotal) statTotal.innerText = data.total_credits;
-            if(statReq) statReq.innerText = data.grad_req_credits;
-            if(statGpa) statGpa.innerText = data.gpa;
-        }
-    } catch (e) { console.error(e); }
+    updateStatsFromCart();
 }
 
 // 공지사항 불러오기
@@ -643,12 +658,26 @@ async function loadUserProfile() {
             const subDeptEl = document.querySelector('.department-info .sub-dept');
             const yearEl = document.querySelector('.department-info .year');
             console.log('[profile] data:', data);
-            if (nameEl) nameEl.innerText = data.name;
-            if (idEl) idEl.innerText = data.student_id;
-            if (collegeEl && data.college) collegeEl.innerText = data.college;
-            if (subDeptEl && data.depart) {
-                const gradeText = data.grade ? ` <span class="year">${data.grade}학년</span>` : '';
-                subDeptEl.innerHTML = data.depart + gradeText;
+            if (nameEl) nameEl.innerText = data.name || '-';
+            if (idEl) idEl.innerText = data.student_id || data.loginid || '-';
+            
+            const isStaff = data.role === 'STAFF';
+            
+            if (collegeEl) {
+                if (isStaff) {
+                    collegeEl.innerText = '교직원';
+                } else {
+                    collegeEl.innerText = data.college || '소속 대학 없음';
+                }
+            }
+            if (subDeptEl) {
+                if (isStaff) {
+                    subDeptEl.innerHTML = data.depart || '소속 부서 없음';
+                } else {
+                    const departText = data.depart || '소속 학과 없음';
+                    const gradeText = data.grade ? ` <span class="year">${data.grade}학년</span>` : '';
+                    subDeptEl.innerHTML = departText + gradeText;
+                }
             }
         }
     } catch (e) { console.error('Failed to load user profile:', e); }

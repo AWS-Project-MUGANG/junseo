@@ -381,6 +381,10 @@ async function loadSchedule() {
         const res  = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (!res.ok) {
+            const raw = await res.text();
+            throw new Error(`HTTP ${res.status}: ${raw.slice(0, 200)}`);
+        }
         const data = await res.json();
         const schedules = data.schedules || [];
 
@@ -506,7 +510,16 @@ async function saveSchedule() {
             alert('✅ 수강신청 일정이 저장되었습니다.');
             loadSchedule();
         } else {
-            alert('저장 실패: ' + (data.detail || JSON.stringify(data)));
+            let detail = data?.detail;
+            if (Array.isArray(detail)) {
+                detail = detail.map((e) => {
+                    const loc = Array.isArray(e.loc) ? e.loc.join('.') : '';
+                    return `${loc}: ${e.msg || JSON.stringify(e)}`;
+                }).join('\n');
+            } else if (typeof detail === 'object' && detail !== null) {
+                detail = JSON.stringify(detail, null, 2);
+            }
+            alert('저장 실패: ' + (detail || JSON.stringify(data)));
         }
     } catch (e) {
         alert('서버 연결 오류: ' + e.message);

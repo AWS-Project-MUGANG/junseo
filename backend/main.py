@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import time
 import json
@@ -35,6 +35,7 @@ import bcrypt
 
 SECRET_KEY = "mugang_super_secret_key"
 ALGORITHM = "HS256"
+MAX_ENROLL_CREDITS = 25
 
 def verify_password(plain_password, hashed_password):
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
@@ -159,8 +160,8 @@ class EnrollmentRequest(BaseModel):
 
 class EnrollmentScheduleDayRequest(BaseModel):
     day_number: int
-    open_datetime: str   # UTC ISO string
-    close_datetime: str  # UTC ISO string
+    open_datetime: Optional[str] = None   # UTC ISO string
+    close_datetime: Optional[str] = None  # UTC ISO string
     restriction_type: str  # 'own_grade_dept' | 'own_college' | 'all'
     is_active: bool = True
 
@@ -638,6 +639,22 @@ def create_enrollment(req: EnrollmentRequest, db: Session = Depends(get_db)):
     lecture = db.query(models.Lecture).filter(models.Lecture.lecture_id == req.lecture_id).first()
     if not lecture:
         raise HTTPException(status_code=404, detail="강의 정보를 찾을 수 없습니다.")
+
+    # 학점 상한(25) 검증: 장바구니 + 확정 과목 기준
+    current_credits = db.query(
+        func.coalesce(func.sum(models.Lecture.credit), 0)
+    ).join(
+        models.Enrollment, models.Enrollment.lecture_id == models.Lecture.lecture_id
+    ).filter(
+        models.Enrollment.user_id == req.user_id,
+        models.Enrollment.enroll_status.in_(["BASKET", "COMPLETED"])
+    ).scalar()
+    new_total_credits = int(current_credits or 0) + int(lecture.credit or 0)
+    if new_total_credits > MAX_ENROLL_CREDITS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"최대 신청 가능 학점({MAX_ENROLL_CREDITS})을 초과합니다.\n현재 {int(current_credits or 0)}학점"
+        )
 
     # 1. 정원이 꽉 찼는지 확인
     if lecture.capacity > 0 and lecture.count >= lecture.capacity:
@@ -1425,8 +1442,8 @@ def get_enrollment_schedule(db: Session = Depends(get_db)):
         {
             "id": s.id,
             "day_number": s.day_number,
-            "open_datetime": s.open_datetime.isoformat() + "Z",
-            "close_datetime": s.close_datetime.isoformat() + "Z",
+            "open_datetime": (s.open_datetime.isoformat() + "Z") if s.open_datetime else None,
+            "close_datetime": (s.close_datetime.isoformat() + "Z") if s.close_datetime else None,
             "restriction_type": s.restriction_type,
             "is_active": s.is_active,
             "updated_at": s.updated_at.isoformat() if s.updated_at else None,
@@ -1438,11 +1455,23 @@ def get_enrollment_schedule(db: Session = Depends(get_db)):
 def save_enrollment_schedule(req: EnrollmentScheduleBulkRequest, db: Session = Depends(get_db)):
     """관리자용: 수강신청 일차별 기간·제한 저장 (upsert)"""
     for day_req in req.schedules:
-        try:
-            open_dt = datetime.fromisoformat(day_req.open_datetime.replace("Z", ""))
-            close_dt = datetime.fromisoformat(day_req.close_datetime.replace("Z", ""))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"날짜 형식 오류: {e}")
+        open_dt = None
+        close_dt = None
+        if day_req.open_datetime:
+            try:
+                open_dt = datetime.fromisoformat(day_req.open_datetime.replace("Z", ""))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid open_datetime: {e}")
+        if day_req.close_datetime:
+            try:
+                close_dt = datetime.fromisoformat(day_req.close_datetime.replace("Z", ""))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid close_datetime: {e}")
+
+        if day_req.is_active and (open_dt is None or close_dt is None):
+            raise HTTPException(status_code=400, detail=f"Day {day_req.day_number}: active schedule requires open_datetime and close_datetime")
+        if open_dt and close_dt and open_dt >= close_dt:
+            raise HTTPException(status_code=400, detail=f"Day {day_req.day_number}: close_datetime must be later than open_datetime")
 
         existing = db.query(models.EnrollmentSchedule).filter(
             models.EnrollmentSchedule.day_number == day_req.day_number
@@ -1647,3 +1676,5 @@ if os.path.exists(frontend_dir):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
