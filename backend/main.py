@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import random
@@ -305,6 +305,82 @@ def generate_answer_with_bedrock(query: str, context: str) -> str:
     except Exception as e:
         logger.error(f"Bedrock Generation Error: {e}")
         return None
+
+def recommend_lectures_with_bedrock(
+    preference: str,
+    user_profile: Dict[str, Any],
+    candidates: List[Dict[str, Any]]
+) -> List[int]:
+    """Bedrock Claude를 사용해 후보 강의 중 추천 lecture_id 목록(최대 3개)을 반환."""
+    try:
+        config = Config(connect_timeout=5, read_timeout=60)
+        bedrock = boto3.client(service_name='bedrock-runtime', region_name='us-east-1', config=config)
+
+        # LLM 입력을 단순화해 토큰/비용을 줄임
+        compact_candidates = [
+            {
+                "lecture_id": c["lecture_id"],
+                "subject": c["subject"],
+                "department": c["department"],
+                "lec_grade": c["lec_grade"],
+                "type": c["type"],
+                "credit": c["credit"],
+            }
+            for c in candidates
+        ]
+
+        prompt = (
+            "\n\nHuman: 당신은 대학 수강 추천 어시스턴트입니다. "
+            "아래 학생 프로필과 선호를 바탕으로 후보 강의 중 최대 3개를 추천하세요. "
+            "응답은 반드시 JSON만 출력하세요.\n\n"
+            "출력 형식:\n"
+            "{\"recommended_lecture_ids\":[정수,정수,...],\"reason\":\"간단한 사유\"}\n\n"
+            f"[학생 프로필]\n{json.dumps(user_profile, ensure_ascii=False)}\n\n"
+            f"[선호]\n{preference}\n\n"
+            f"[후보 강의]\n{json.dumps(compact_candidates, ensure_ascii=False)}\n\n"
+            "규칙: 후보에 없는 lecture_id는 절대 선택하지 말 것. 최대 3개만 선택할 것.\n\n"
+            "Assistant:"
+        )
+
+        body = json.dumps({
+            "prompt": prompt,
+            "max_tokens_to_sample": 400,
+            "temperature": 0.1,
+            "top_p": 0.9
+        })
+
+        response = bedrock.invoke_model(
+            modelId="anthropic.claude-v2",
+            contentType="application/json",
+            accept="application/json",
+            body=body
+        )
+        response_body = json.loads(response.get("body").read())
+        completion = (response_body.get("completion") or "").strip()
+        if not completion:
+            return []
+
+        # Claude가 설명 문장을 섞어도 JSON 블록만 추출
+        m = re.search(r"\{.*\}", completion, re.DOTALL)
+        json_text = m.group(0) if m else completion
+        parsed = json.loads(json_text)
+        ids = parsed.get("recommended_lecture_ids", [])
+
+        valid_ids = {c["lecture_id"] for c in candidates}
+        normalized = []
+        for x in ids:
+            try:
+                lx = int(x)
+            except Exception:
+                continue
+            if lx in valid_ids and lx not in normalized:
+                normalized.append(lx)
+            if len(normalized) >= 3:
+                break
+        return normalized
+    except Exception as e:
+        logger.error(f"Bedrock Recommendation Error: {e}")
+        return []
 
 # ---- API 라우터 ----
 
@@ -1257,15 +1333,59 @@ class AIRecommendRequest(BaseModel):
     
 @app.post("/api/v1/student/ai/recommend")
 def get_ai_recommendation(req: AIRecommendRequest, db: Session = Depends(get_db)):
-    """AI를 활용한 학생 맞춤형 과목 추천 (Bedrock Mocking) 및 장바구니 자동 적재"""
+    """AI를 활용한 학생 맞춤형 과목 추천(Bedrock) 및 장바구니 자동 적재"""
     user = db.query(models.User).filter(models.User.user_no == req.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="사용자 정보를 찾을 수 없습니다.")
-        
-    # 실제 환경에서는 boto3로 Bedrock Titan/Claude를 호출해 아래 로직 수행
-    # 현재는 전체 강의 중 랜덤하게 또는 Mock 로직으로 응답한다고 가정.
-    all_lectures = db.query(models.Lecture).limit(5).all()
-    recommended_ids = [lec.lecture_id for lec in all_lectures[:3]] # 3개 추천
+
+    # 후보군(최대 30개): 같은 학년 우선
+    q = db.query(models.Lecture)
+    if user.grade is not None:
+        q = q.order_by(
+            (models.Lecture.lec_grade == str(user.grade)).desc(),
+            models.Lecture.lecture_id.asc()
+        )
+    else:
+        q = q.order_by(models.Lecture.lecture_id.asc())
+    all_lectures = q.limit(30).all()
+    if not all_lectures:
+        return {
+            "message": "추천 가능한 강의 데이터가 없습니다.",
+            "recommended_count": 0,
+            "recommended_lectures": [],
+            "engine": "none"
+        }
+
+    candidates = [
+        {
+            "lecture_id": lec.lecture_id,
+            "subject": lec.subject,
+            "department": lec.department,
+            "lec_grade": lec.lec_grade,
+            "type": lec.type,
+            "credit": lec.credit
+        }
+        for lec in all_lectures
+    ]
+
+    user_profile = {
+        "user_no": user.user_no,
+        "grade": user.grade,
+        "dept_no": user.dept_no,
+        "role": user.role
+    }
+
+    recommended_ids = recommend_lectures_with_bedrock(
+        preference=req.preference,
+        user_profile=user_profile,
+        candidates=candidates
+    )
+
+    # Bedrock 실패/무응답 대비 폴백
+    engine = "bedrock"
+    if not recommended_ids:
+        recommended_ids = [lec.lecture_id for lec in all_lectures[:3]]
+        engine = "fallback"
     
     inserted_count = 0
     for l_id in recommended_ids:
@@ -1278,12 +1398,28 @@ def get_ai_recommendation(req: AIRecommendRequest, db: Session = Depends(get_db)
             new_en = models.Enrollment(user_id=req.user_id, lecture_id=l_id, enroll_status="BASKET")
             db.add(new_en)
             inserted_count += 1
-            
+             
     db.commit()
+
+    recommended_lectures = []
+    rec_set = set(recommended_ids)
+    for lec in all_lectures:
+        if lec.lecture_id in rec_set:
+            recommended_lectures.append({
+                "lecture_id": lec.lecture_id,
+                "subject": lec.subject,
+                "department": lec.department,
+                "grade": lec.lec_grade,
+                "type": lec.type,
+                "credit": lec.credit,
+                "professor": lec.professor
+            })
     
     return {
-        "message": f"AI 분석 결과에 따라 {inserted_count}개의 과목이 장바구니에 담겼습니다.",
+        "message": f"AI 추천 결과 {inserted_count}개 과목이 장바구니에 반영되었습니다.",
         "recommended_count": len(recommended_ids),
+        "recommended_lectures": recommended_lectures,
+        "engine": engine,
         "popular_chat_keywords": [
             {"keyword": "수강신청", "count": 145},
             {"keyword": "휴학", "count": 89},
