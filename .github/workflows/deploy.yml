@@ -169,24 +169,24 @@ jobs:
           --output text)
         echo "proxy_id=$PROXY_ID" >> $GITHUB_OUTPUT
 
-        # Proxy SSM 온라인 상태 먼저 확인 (오프라인이면 즉시 실패)
+        # Inactive 인스턴스 SSM 온라인 상태 먼저 확인
         PING=$(aws ssm describe-instance-information \
-          --filters "Key=InstanceIds,Values=${PROXY_ID}" \
+          --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
           --query "InstanceInformationList[0].PingStatus" \
           --output text 2>/dev/null || echo "Unknown")
         if [ "$PING" != "Online" ]; then
-          echo "Proxy SSM 상태 비정상: ${PING}"
-          echo "mugang-proxy 인스턴스에 SSM 에이전트/권한 상태를 확인하세요."
+          echo "Inactive 인스턴스 SSM 상태 비정상: ${PING}"
+          echo "blue/green 인스턴스의 SSM 에이전트/권한 상태를 확인하세요."
           exit 1
         fi
 
-        # Proxy에서 Inactive EC2로 헬스체크 (SSM RunCommand)
+        # Inactive EC2 내부에서 localhost 헬스체크 (SSM RunCommand)
         echo "헬스체크 대기 중 (최대 4분)..."
         for i in $(seq 1 20); do
           CMD_ID=$(timeout 12 aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --instance-ids "$PROXY_ID" \
-            --parameters "{\"commands\":[\"code=$(curl -s -o /dev/null -w '%{http_code}' http://${INACTIVE_IP}:8000/docs || true); echo HTTP_CODE=$code; test \\\"$code\\\" = \\\"200\\\"\"]}" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "{\"commands\":[\"code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/docs || true); echo HTTP_CODE=$code; test \\\"$code\\\" = \\\"200\\\"\"]}" \
             --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
           sleep 8
@@ -194,7 +194,7 @@ jobs:
           if [ -n "$CMD_ID" ]; then
             STATUS=$(timeout 12 aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
-              --instance-id "$PROXY_ID" \
+              --instance-id "$INSTANCE_ID" \
               --query 'StatusDetails' --output text 2>/dev/null || echo "Pending")
             echo "  [${i}/20] 헬스체크: $STATUS"
             if [ "$STATUS" = "Success" ]; then
