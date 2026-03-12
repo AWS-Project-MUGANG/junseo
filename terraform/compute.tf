@@ -34,7 +34,7 @@ resource "aws_instance" "proxy" {
     NEW_COLOR=$1
     NEW_IP=$2
 
-    sed -i "s/server [0-9.]*:8000/server $NEW_IP:8000/g" \
+    sed -i "s/server [0-9.]*:[0-9]*/server $NEW_IP:80/g" \
       /etc/nginx/conf.d/proxy.conf
 
     nginx -t && nginx -s reload
@@ -45,7 +45,7 @@ resource "aws_instance" "proxy" {
     # 초기 nginx 설정 (배포 전 503 반환)
     cat > /etc/nginx/conf.d/proxy.conf << 'NGINX'
     upstream active_backend {
-        server 127.0.0.1:8000;
+        server 127.0.0.1:80;
     }
     server {
         listen 80;
@@ -105,6 +105,8 @@ resource "aws_launch_template" "blue" {
     services:
       backend:
         image: $${ECR_REGISTRY}/mugang-backend:$${IMAGE_TAG}
+        environment:
+          - DATABASE_URL=postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres_db.address}:5432/${var.db_name}
         ports: ["8000:8000"]
         restart: always
       frontend:
@@ -162,6 +164,8 @@ resource "aws_launch_template" "green" {
     services:
       backend:
         image: $${ECR_REGISTRY}/mugang-backend:$${IMAGE_TAG}
+        environment:
+          - DATABASE_URL=postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres_db.address}:5432/${var.db_name}
         ports: ["8000:8000"]
         restart: always
       frontend:

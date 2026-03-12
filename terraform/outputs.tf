@@ -31,3 +31,8 @@ output "inactive_color" {
   description = "현재 대기 환경 색 (다음 배포 대상)"
   value       = local.inactive_color
 }
+
+output "ecr_registry" {
+  description = "ECR 레지스트리 URL (계정ID.dkr.ecr.리전.amazonaws.com)"
+  value       = "${data.aws_caller_identity.current.account_id}.dkr.ecr.ap-northeast-2.amazonaws.com"
+}

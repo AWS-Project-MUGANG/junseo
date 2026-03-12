@@ -51,4 +51,11 @@ jobs:
         TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
       run: |
         terraform destroy -auto-approve
-        echo "모든 AWS 리소스가 삭제되었습니다."
+        echo "메인 AWS 리소스 삭제 완료 (ECR 포함)"
+
+    - name: S3 상태 버킷 삭제
+      run: |
+        echo "S3 버킷 내용물 삭제 중..."
+        aws s3 rm s3://${{ secrets.TF_STATE_BUCKET }} --recursive
+        aws s3 rb s3://${{ secrets.TF_STATE_BUCKET }}
+        echo "S3 상태 버킷 삭제 완료"
