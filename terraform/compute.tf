@@ -21,7 +21,7 @@ resource "aws_instance" "proxy" {
   iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
   associate_public_ip_address = true
 
-  user_data = <<-EOF
+  user_data = replace(<<-EOF
     #!/bin/bash
     set -e
 
@@ -35,8 +35,8 @@ resource "aws_instance" "proxy" {
     NEW_COLOR=$1
     NEW_IP=$2
 
-    sed -i "s/server [0-9.]*:[0-9]*/server $NEW_IP:80/g" \
-      /etc/nginx/conf.d/proxy.conf
+    sed -i "s/server [0-9.]*:[0-9]*/server $NEW_IP:8000/g" \
+      /etc/nginx/sites-available/default
 
     nginx -t && nginx -s reload
     echo "Proxy switched to $NEW_COLOR: $NEW_IP"
@@ -44,9 +44,9 @@ resource "aws_instance" "proxy" {
     chmod +x /usr/local/bin/update-proxy.sh
 
     # 초기 nginx 설정 (배포 전 503 반환)
-    cat > /etc/nginx/conf.d/proxy.conf << 'NGINX'
+    cat > /etc/nginx/sites-available/default << 'NGINX'
     upstream active_backend {
-        server 127.0.0.1:80;
+        server 127.0.0.1:8000;
     }
     server {
         listen 80;
@@ -61,8 +61,10 @@ resource "aws_instance" "proxy" {
     }
     NGINX
 
-    systemctl start nginx
+    nginx -t
+    systemctl restart nginx
   EOF
+  , "\r\n", "\n")
 
   tags = { Name = "mugang-proxy", Role = "proxy" }
 }
@@ -80,7 +82,7 @@ resource "aws_launch_template" "blue" {
 
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
-  user_data = base64encode(<<-EOF
+  user_data = base64encode(replace(<<-EOF
     #!/bin/bash
     set -e
 
@@ -118,7 +120,7 @@ resource "aws_launch_template" "blue" {
 
     docker-compose -f /app/docker-compose.yml up -d
   EOF
-  )
+  , "\r\n", "\n"))
 
   tag_specifications {
     resource_type = "instance"
@@ -139,7 +141,7 @@ resource "aws_launch_template" "green" {
 
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
-  user_data = base64encode(<<-EOF
+  user_data = base64encode(replace(<<-EOF
     #!/bin/bash
     set -e
 
@@ -177,7 +179,7 @@ resource "aws_launch_template" "green" {
 
     docker-compose -f /app/docker-compose.yml up -d
   EOF
-  )
+  , "\r\n", "\n"))
 
   tag_specifications {
     resource_type = "instance"
