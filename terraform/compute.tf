@@ -35,7 +35,9 @@ resource "aws_instance" "proxy" {
     NEW_COLOR=$1
     NEW_IP=$2
 
-    sed -i "s/server [0-9.]*:[0-9]*/server $NEW_IP:8000/g" \
+    sed -E -i "s/server [0-9.]+:80;/server $NEW_IP:80;/g" \
+      /etc/nginx/sites-available/default
+    sed -E -i "s/server [0-9.]+:8000;/server $NEW_IP:8000;/g" \
       /etc/nginx/sites-available/default
 
     nginx -t && nginx -s reload
@@ -45,18 +47,35 @@ resource "aws_instance" "proxy" {
 
     # 초기 nginx 설정 (배포 전 503 반환)
     cat > /etc/nginx/sites-available/default << 'NGINX'
-    upstream active_backend {
+    upstream frontend_backend {
+        server 127.0.0.1:80;
+    }
+    upstream api_backend {
         server 127.0.0.1:8000;
     }
     server {
         listen 80;
         location /health {
-            return 200 "proxy-ok";
+            default_type text/plain;
+            return 200 "proxy-ok\n";
         }
-        location / {
-            proxy_pass http://active_backend;
+        location ~ ^/(docs|openapi.json|redoc) {
+            proxy_pass http://api_backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
+            proxy_http_version 1.1;
+        }
+        location ^~ /api/ {
+            proxy_pass http://api_backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_http_version 1.1;
+        }
+        location / {
+            proxy_pass http://frontend_backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_http_version 1.1;
         }
     }
     NGINX
