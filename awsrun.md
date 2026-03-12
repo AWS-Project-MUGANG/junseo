@@ -194,3 +194,71 @@ curl.exe -i http://13.124.164.171/api/time
 - app SG 인바운드 추가:
   - proxy_sg -> app_sg `80/tcp` 허용
 - DB 복구/이관으로 필수 테이블/데이터 반영 완료
+
+---
+
+## 8) 개발 모드/검증 모드 전환 (중요)
+AWS 비용 절감을 위해 기본은 로컬 개발 모드로 진행하고, 배포 검증 시에만 AWS를 올린다.
+
+### A. 로컬 개발 모드 (기본)
+목적: 기능 개발/디버깅, 비용 0원에 가깝게 작업
+
+1) 로컬 DB/앱 실행
+```powershell
+cd C:\Users\junse\Desktop\vscode\team-project\junseo
+docker compose up -d
+```
+
+2) 로컬 DB 확인
+```powershell
+docker ps
+```
+
+3) 로컬 접속
+- 프론트/백엔드 로컬 주소로 기능 테스트
+- DB는 `mugang_aws-db-1` 컨테이너(5432) 사용
+
+### B. AWS 검증 모드 (배포 확인할 때만)
+목적: 실제 배포 경로/권한/네트워크 최종 검증
+
+1) 인프라 올리기
+```powershell
+cd C:\Users\junse\Desktop\vscode\team-project\junseo\terraform
+& "C:\terraform\terraform.exe" init -backend-config="bucket=mugang-s3" -backend-config="key=mugang/terraform.tfstate" -backend-config="region=ap-northeast-2"
+& "C:\terraform\terraform.exe" apply -auto-approve
+```
+
+2) 배포 반영
+```powershell
+cd C:\Users\junse\Desktop\vscode\team-project\junseo
+git push origin junseo
+```
+- 필요 시 `main` 머지 후 Actions 배포 확인
+
+3) 검증
+```powershell
+curl.exe -I http://<proxy_public_ip>/
+curl.exe -I http://<proxy_public_ip>/docs
+curl.exe -i http://<proxy_public_ip>/api/time
+```
+
+### C. 작업 종료 모드 (비용 절감)
+목적: 하루 작업 끝난 후 과금 중지
+
+#### C-1. 완전 종료(권장)
+```powershell
+cd C:\Users\junse\Desktop\vscode\team-project\junseo\terraform
+& "C:\terraform\terraform.exe" destroy -auto-approve
+```
+
+#### C-2. 부분 종료(빠른 재시작용)
+```powershell
+& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" autoscaling update-auto-scaling-group --auto-scaling-group-name mugang-blue-asg --desired-capacity 0 --region ap-northeast-2
+& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" autoscaling update-auto-scaling-group --auto-scaling-group-name mugang-green-asg --desired-capacity 0 --region ap-northeast-2
+& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" rds stop-db-instance --db-instance-identifier mugang-db --region ap-northeast-2
+```
+
+권장 운영 원칙:
+- 개발 중: AWS 내리고 로컬 DB로 작업
+- 검증 때만: AWS 올려서 최종 점검
+- 끝나면: 다시 AWS 내리기
