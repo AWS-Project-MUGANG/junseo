@@ -71,6 +71,23 @@ def ensure_schema_compatibility():
 
             # 구 DDL에서 sche_no가 NOT NULL이면 강의 담기 INSERT가 실패할 수 있어 해제
             conn.execute(text("ALTER TABLE enroll_tb ALTER COLUMN sche_no DROP NOT NULL"))
+
+            # rag_docs_tb: 과거 스키마(doc_metadata)와 현재 스키마(metadata) 호환
+            conn.execute(text("ALTER TABLE rag_docs_tb ADD COLUMN IF NOT EXISTS metadata JSON"))
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'rag_docs_tb'
+                          AND column_name = 'doc_metadata'
+                    ) THEN
+                        EXECUTE 'UPDATE rag_docs_tb SET metadata = doc_metadata WHERE metadata IS NULL';
+                    END IF;
+                END
+                $$;
+            """))
     except Exception as e:
         logger.warning(f"Schema compatibility patch skipped or partially failed: {e}")
 
