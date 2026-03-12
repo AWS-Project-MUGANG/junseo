@@ -16,6 +16,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   build-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       image_tag: ${{ steps.set-tag.outputs.image_tag }}
 
@@ -68,6 +69,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   blue-green-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: build-and-push
 
     steps:
@@ -168,8 +170,8 @@ jobs:
         echo "proxy_id=$PROXY_ID" >> $GITHUB_OUTPUT
 
         # Proxy에서 Inactive EC2로 헬스체크 (SSM RunCommand)
-        echo "헬스체크 대기 중 (최대 8분)..."
-        for i in $(seq 1 48); do
+        echo "헬스체크 대기 중 (최대 4분)..."
+        for i in $(seq 1 20); do
           CMD_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$PROXY_ID" \
@@ -183,7 +185,7 @@ jobs:
               --command-id "$CMD_ID" \
               --instance-id "$PROXY_ID" \
               --query 'StatusDetails' --output text 2>/dev/null || echo "Pending")
-            echo "  [${i}/18] 헬스체크: $STATUS"
+            echo "  [${i}/20] 헬스체크: $STATUS"
             if [ "$STATUS" = "Success" ]; then
               echo "헬스체크 통과!"
               exit 0
