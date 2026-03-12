@@ -181,29 +181,43 @@ jobs:
         fi
 
         # Inactive EC2 내부에서 localhost 헬스체크 (SSM RunCommand)
+        # 주의: SSM Status가 Pending/InProgress일 때는 실패가 아니라 진행중으로 처리
         echo "헬스체크 대기 중 (최대 4분)..."
         for i in $(seq 1 20); do
-          CMD_ID=$(timeout 12 aws ssm send-command \
+          CMD_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$INSTANCE_ID" \
-            --parameters "{\"commands\":[\"code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/docs || true); echo HTTP_CODE=$code; test \\\"$code\\\" = \\\"200\\\"\"]}" \
+            --parameters commands='["curl -fsS http://127.0.0.1:8000/docs >/dev/null"]' \
             --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
-          sleep 8
+          if [ -z "$CMD_ID" ]; then
+            echo "  [${i}/20] 헬스체크: NoCommandId"
+            sleep 8
+            continue
+          fi
 
-          if [ -n "$CMD_ID" ]; then
-            STATUS=$(timeout 12 aws ssm get-command-invocation \
+          ATTEMPT_STATUS="Pending"
+          for j in $(seq 1 8); do
+            ATTEMPT_STATUS=$(aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query 'StatusDetails' --output text 2>/dev/null || echo "Pending")
-            echo "  [${i}/20] 헬스체크: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+
+            if [ "$ATTEMPT_STATUS" = "Success" ]; then
+              echo "  [${i}/20] 헬스체크: Success"
               echo "헬스체크 통과!"
               exit 0
             fi
-          else
-            echo "  [${i}/20] 헬스체크: NoCommandId"
-          fi
+
+            if [ "$ATTEMPT_STATUS" = "Failed" ] || [ "$ATTEMPT_STATUS" = "Cancelled" ] || [ "$ATTEMPT_STATUS" = "TimedOut" ]; then
+              break
+            fi
+
+            sleep 3
+          done
+
+          echo "  [${i}/20] 헬스체크: $ATTEMPT_STATUS"
+          sleep 5
         done
 
         echo "헬스체크 실패 — 원인 수집 시작"
