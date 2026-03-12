@@ -70,7 +70,7 @@ resource "aws_instance" "proxy" {
 resource "aws_launch_template" "blue" {
   name_prefix   = "mugang-blue-"
   image_id      = "ami-0c9c942bd7bf113a2"
-  instance_type = "t3.medium"
+  instance_type = "t3.micro"
   key_name      = var.key_name
 
   iam_instance_profile {
@@ -129,7 +129,7 @@ resource "aws_launch_template" "blue" {
 resource "aws_launch_template" "green" {
   name_prefix   = "mugang-green-"
   image_id      = "ami-0c9c942bd7bf113a2"
-  instance_type = "t3.medium"
+  instance_type = "t3.micro"
   key_name      = var.key_name
 
   iam_instance_profile {

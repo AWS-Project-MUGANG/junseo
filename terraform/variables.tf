@@ -50,3 +50,9 @@ variable "green_desired" {
   type        = number
   default     = 0
 }
+
+variable "log_retention_days" {
+  description = "CloudWatch Logs 보관 기간(일)"
+  type        = number
+  default     = 14
+}
