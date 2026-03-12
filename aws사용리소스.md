@@ -4,13 +4,13 @@
 ### 1. VPC 및 네트워킹 (`vpc.tf`)
 보안 강화를 위해 Public/Private Subnet을 분리하고, Private Subnet의 외부 통신을 위해 NAT Gateway를 구성합니다.
 *   `aws_vpc`: 1개
-*   `aws_subnet`: 2개 (Public 1개, Private 1개)
+*   `aws_subnet`: 4개 (ALB 및 RDS 요건 충족을 위한 2개 가용영역 사용: Public 2개, Private 2개)
 *   `aws_internet_gateway`: 1개
 *   `aws_eip`: 1개 (NAT 게이트웨이용 고정 IP)
-*   `aws_nat_gateway`: 1개
+*   `aws_nat_gateway`: 1개 (비용 안정화를 위해 단일 AZ에만 1개 배치)
 *   `aws_route_table`: 2개 (Public용 1개, Private용 1개)
-*   `aws_route_table_association`: 2개
-*   **소계: 9개**
+*   `aws_route_table_association`: 4개 (각 서브넷을 라우팅 테이블에 연결)
+*   **소계: 14개**
 
 ### 2. 컴퓨팅 및 로드밸런싱 (`compute.tf`)
 사용자 트래픽을 분산하는 ALB와 애플리케이션을 실행하는 EC2 서버, 그리고 EC2가 다른 AWS 서비스에 접근하기 위한 권한 설정으로 구성됩니다.
@@ -39,5 +39,3 @@
 ---
 ### 깃허브
 github action 사용
-### 총 리소스 개수 요약
-위 내역을 종합하면, 현재 프로젝트는 **총 24개의 주요 AWS 리소스**로 인프라를 구축하여 보안, 확장성, 비용 효율성을 모두 고려했습니다.
