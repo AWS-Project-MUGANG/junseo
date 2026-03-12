@@ -26,3 +26,9 @@ variable "cluster_name" {
   type        = string
   default     = "mugang-eks"
 }
+
+variable "image_tag" {
+  description = "ECR에 푸시된 Docker 이미지 태그 (GitHub Actions에서 커밋 SHA로 주입)"
+  type        = string
+  default     = "latest"
+}
