@@ -1,17 +1,15 @@
 # --------------------------------------------------------------------------------------------------
 # 보안 그룹 (Security Groups)
-# --------------------------------------------------------------------------------------------------
-# 프로젝트의 study.md 가이드에 따라 네트워크 보안 규칙을 정의합니다.
-# 1. ALB (Load Balancer): 외부 인터넷(HTTP/HTTPS)에서만 접근 허용
-# 2. EKS Nodes: ALB와 노드 내부 통신만 허용
-# 3. RDS (Database): EKS 노드에서만 접근 허용
+# 1. proxy_sg  : 외부 HTTP(80) → Proxy EC2
+# 2. app_sg    : Proxy EC2에서만 FastAPI(8000) 접근 허용
+# 3. rds_sg    : App EC2에서만 PostgreSQL(5432) 접근 허용
 # --------------------------------------------------------------------------------------------------
 
-# 1. ALB Security Group (Public)
-resource "aws_security_group" "alb_sg" {
-  name        = "mugang-alb-sg"
-  description = "Allow HTTP inbound traffic"
-  vpc_id      = module.vpc.vpc_id
+# 1. Proxy Security Group (Public - 사용자 트래픽 수신)
+resource "aws_security_group" "proxy_sg" {
+  name        = "mugang-proxy-sg"
+  description = "Allow HTTP inbound to Nginx proxy"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port   = 80
@@ -28,18 +26,18 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-# 2. App Server Security Group (Private)
+# 2. App Server Security Group (Private - Proxy EC2에서만 접근)
 resource "aws_security_group" "app_sg" {
   name        = "mugang-app-sg"
-  description = "Security group for App Server"
-  vpc_id      = module.vpc.vpc_id
+  description = "Allow traffic from proxy to FastAPI"
+  vpc_id      = aws_vpc.main.id
 
-  # ALB에서 오는 트래픽만 허용
   ingress {
     from_port       = 8000
     to_port         = 8000
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+    security_groups = [aws_security_group.proxy_sg.id]
+    description     = "FastAPI from Proxy EC2"
   }
 
   egress {
@@ -50,22 +48,20 @@ resource "aws_security_group" "app_sg" {
   }
 }
 
-# RDS PostgreSQL 데이터베이스를 위한 보안 그룹
+# 3. RDS Security Group (Private - App EC2에서만 접근)
 resource "aws_security_group" "rds_sg" {
   name        = "mugang-rds-sg"
-  description = "Security group for the RDS PostgreSQL instance"
-  vpc_id      = module.vpc.vpc_id
+  description = "Allow PostgreSQL from App Server"
+  vpc_id      = aws_vpc.main.id
 
-  # EKS 노드로부터의 PostgreSQL(5432) 접근 허용
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.app_sg.id]
-    description     = "Allow PostgreSQL traffic from App Server"
+    description     = "PostgreSQL from App Server"
   }
 
-  # 외부로 나가는 모든 트래픽 허용
   egress {
     from_port   = 0
     to_port     = 0
@@ -73,7 +69,5 @@ resource "aws_security_group" "rds_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "mugang-rds-sg"
-  }
+  tags = { Name = "mugang-rds-sg" }
 }

@@ -21,12 +21,6 @@ variable "key_name" {
   type        = string
 }
 
-variable "cluster_name" {
-  description = "EKS 클러스터 이름"
-  type        = string
-  default     = "mugang-eks"
-}
-
 variable "blue_image_tag" {
   description = "Blue 환경 Docker 이미지 태그"
   type        = string
@@ -43,4 +37,16 @@ variable "active_color" {
   description = "현재 라이브 환경 (blue 또는 green)"
   type        = string
   default     = "blue"
+}
+
+variable "blue_desired" {
+  description = "Blue ASG desired capacity (0 또는 1)"
+  type        = number
+  default     = 1
+}
+
+variable "green_desired" {
+  description = "Green ASG desired capacity (0 또는 1)"
+  type        = number
+  default     = 0
 }

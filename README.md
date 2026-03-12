@@ -35,6 +35,7 @@ docker-compose build --no-cache
 
 
 # 아키텍처 구조
+```mermaid
 flowchart TD
     User(["👤 사용자"])
 
@@ -129,3 +130,15 @@ flowchart TD
     Job2 -->|"terraform apply\nuser_data 교체"| BlueEC2
     Job2 -->|"terraform apply\nuser_data 교체"| GreenEC2
     Job2 -->|"ALB 리스너 전환\nactive_color 변경"| ALB
+```    
+구분	구성 요소	상세 내용	비고
+CI/CD	GitHub Actions	Job 1: Docker Build & Push (ECR)Job 2: Terraform Blue/Green 배포	deploy.yml
+Network	ALB	mugang-alb (HTTP :80)	Blue/Green 트래픽 전환
+NAT Gateway	Private EC2의 외부 통신(ECR Pull 등) 지원	Public Subnet 위치
+Compute	EC2 (Blue/Green)	t3.medium (Amazon Linux 2023)Docker Compose (Nginx + FastAPI)	compute.tf
+ECR	mugang-frontend, mugang-backend	컨테이너 이미지 저장소
+Database	RDS	PostgreSQL 15.3 (db.t3.micro)	pgvector 확장 사용
+DynamoDB	mugang-chat-history	채팅 기록 저장 (PK: session_id)
+AI/ML	Amazon Bedrock	Claude / Titan 모델	us-east-1 리전 호출 (boto3)
+Security	IAM Role	mugang_ec2_role	ECR Read, Bedrock Full, S3 Read
+IaC	Terraform	S3 Backend (mugang/terraform.tfstate)	상태 관리 및 인프라 프로비저닝

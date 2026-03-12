@@ -1,6 +1,6 @@
 resource "aws_db_subnet_group" "rds_sub_group" {
   name       = "mugang-rds-sub-group"
-  subnet_ids = module.vpc.private_subnets
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_c.id]
 
   tags = {
     Name = "Mugang RDS Subnet Group"

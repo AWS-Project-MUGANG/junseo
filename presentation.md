@@ -21,14 +21,96 @@
 
 ### 2. 전체 아키텍처 및 네트워크 격리 전략 (1분 30초)
 - **아키텍처 구조 (Architecture)**:
-![alt text](image-2.png)
 
-  - **AI 파이프라인**: S3 업로드 이벤트가 Lambda를 트리거하고, Bedrock이 추론하는 **이벤트 기반 아키텍처**를 적용했습니다.
-  - **트래픽 흐름**: 사용자 요청은 **ALB(로드밸런서)**를 통해 Public Subnet에 진입합니다. 실제 애플리케이션 컨테이너가 실행되는 **EC2 서버**와 **RDS 데이터베이스**는 Private Subnet에 배치하여 외부 인터넷으로부터 직접적인 접근을 차단하고 격리했습니다.
+```mermaid
+flowchart TD
+    User(["👤 사용자"])
+
+    subgraph CICD["⚙️ GitHub Actions CI/CD"]
+        direction TB
+        Push["main branch push"]
+        Job1["📦 Job 1 · build-and-push\ndocker build → ECR 푸시\n태그: GITHUB_SHA 앞 8자리"]
+        Job2["🔄 Job 2 · blue-green-deploy\n① active_color 확인\n② Inactive ASG desired 0→1\n③ InService 대기\n④ 헬스체크 /docs (SSM)\n⑤ Proxy Nginx upstream 교체 (SSM)\n⑥ active_color 교체 + 구 ASG desired→0"]
+        Push --> Job1 --> Job2
+    end
+
+    subgraph AWS["☁️ AWS  ap-northeast-2   ·   AWS 서비스 9개  ·  Terraform 리소스 26개"]
+
+        subgraph ECR["Amazon ECR"]
+            ECR_FE["🖼️ mugang-frontend"]
+            ECR_BE["🖼️ mugang-backend"]
+        end
+
+        S3[("🪣 S3\nTerraform State")]
+
+        subgraph Bedrock["Amazon Bedrock · us-east-1"]
+            LLM["🤖 Claude / Titan\n(boto3 호출)"]
+        end
+
+        subgraph VPC["VPC  10.0.0.0/16"]
+
+            subgraph PubSubnet["🌐 Public Subnet  AZ-a  10.0.1.0/24"]
+                Proxy["🔁 Proxy EC2 · t3.micro\nNginx Reverse Proxy  :80\nSSM으로 upstream 전환"]
+                NAT["🔒 NAT Gateway"]
+            end
+
+            subgraph PrivSubnetA["🔒 Private Subnet  AZ-a  10.0.2.0/24"]
+                subgraph BlueASG["🔵 ASG · mugang-blue-asg\ndesired = blue_desired (기본 1)"]
+                    BlueEC2["EC2 · t3.medium\nDocker Compose\nNginx + FastAPI :8000"]
+                end
+            end
+
+            subgraph PrivSubnetC["🔒 Private Subnet  AZ-c  10.0.3.0/24"]
+                subgraph GreenASG["🟢 ASG · mugang-green-asg\ndesired = green_desired (기본 0)"]
+                    GreenEC2["EC2 · t3.medium\nDocker Compose\nNginx + FastAPI :8000"]
+                end
+            end
+
+            RDS[("🐘 RDS PostgreSQL 15.3\ndb.t3.micro  :5432 + pgvector")]
+            DDB[("⚡ DynamoDB\nmugang-chat-history\nPK: session_id  SK: timestamp")]
+
+        end
+
+        subgraph IAM["🔑 IAM Role · mugang_ec2_role  (inline policy 1개)"]
+            P1["ECR Read · Bedrock Invoke · S3 Read · DynamoDB CRUD · SSM"]
+        end
+
+    end
+
+    User -->|"HTTP :80"| Proxy
+    Proxy -->|"active=🔵blue"| BlueEC2
+    Proxy -.->|"active=🟢green 전환 시"| GreenEC2
+
+    BlueEC2  -->|"SQLAlchemy :5432"| RDS
+    GreenEC2 -->|"SQLAlchemy :5432"| RDS
+    BlueEC2  -->|"boto3"| DDB
+    GreenEC2 -->|"boto3"| DDB
+    BlueEC2  -->|"boto3 Bedrock"| LLM
+    GreenEC2 -->|"boto3 Bedrock"| LLM
+
+    BlueEC2  -->|"ECR Pull (NAT)"| NAT
+    GreenEC2 -->|"ECR Pull (NAT)"| NAT
+    NAT --> ECR
+
+    IAM -.->|"Instance Profile"| Proxy
+    IAM -.->|"Instance Profile"| BlueEC2
+    IAM -.->|"Instance Profile"| GreenEC2
+
+    Job1 -->|"docker push"| ECR_FE
+    Job1 -->|"docker push"| ECR_BE
+    Job2 <-->|"state read/write"| S3
+    Job2 -->|"terraform apply\nASG desired 변경"| BlueASG
+    Job2 -->|"terraform apply\nASG desired 변경"| GreenASG
+    Job2 -->|"SSM RunCommand\nNginx upstream 교체"| Proxy
+```
+
+- **트래픽 흐름**: 사용자 요청 → Proxy EC2(Nginx) → Active Blue/Green EC2(FastAPI). ALB 없이 Proxy EC2가 트래픽을 라우팅합니다.
 - **Why Private Subnet? (보안 강화)**:
-  - 핵심 로직이 담긴 EC2 서버와 데이터베이스(RDS)를 Private Subnet에 배치하여, 허용된 경로(ALB)를 통하지 않고는 인터넷에서 직접 접근할 수 없도록 보안을 강화했습니다.
+  - Blue/Green EC2와 RDS를 Private Subnet에 배치하여 인터넷에서 직접 접근 불가. 허용 경로(Proxy EC2)를 통해서만 접근 가능합니다.
 - **Why NAT Gateway? (패치 및 업데이트)**:
-  - Private Subnet의 EC2 서버가 외부 ECR에서 새로운 도커 이미지를 다운로드하거나, OS 보안 패치를 수행할 수 있도록 외부로 나가는 단방향 통로인 **NAT Gateway**를 구성했습니다.
+  - Private EC2가 ECR에서 Docker 이미지 Pull, OS 보안 패치 등 외부 통신 시 단방향 통로로 활용합니다.
+- **Why ASG? (비용 절감 + 자동 복구)**:
+  - 비활성 환경 `desired=0` → EC2 비용 0. 장애 시 자동 재시작. 배포 시에만 `desired=1`로 스케일업합니다.
 
 ### 3. 보안 그룹 및 접근 제어 (2분)
 - **리소스**: `aws_security_group`, `Bastion Host`
