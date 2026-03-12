@@ -161,12 +161,12 @@ jobs:
         echo "proxy_id=$PROXY_ID" >> $GITHUB_OUTPUT
 
         # Proxy에서 Inactive EC2로 헬스체크 (SSM RunCommand)
-        echo "헬스체크 대기 중 (최대 3분)..."
-        for i in $(seq 1 18); do
+        echo "헬스체크 대기 중 (최대 8분)..."
+        for i in $(seq 1 48); do
           CMD_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$PROXY_ID" \
-            --parameters "{\"commands\":[\"curl -sf http://${INACTIVE_IP}:8000/docs\"]}" \
+            --parameters "{\"commands\":[\"code=$(curl -s -o /dev/null -w '%{http_code}' http://${INACTIVE_IP}:8000/docs || true); echo HTTP_CODE=$code; test \\\"$code\\\" = \\\"200\\\"\"]}" \
             --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
           sleep 8
@@ -183,6 +183,14 @@ jobs:
             fi
           fi
         done
+
+        echo "헬스체크 실패 — 원인 수집 시작"
+        aws ssm send-command \
+          --document-name "AWS-RunShellScript" \
+          --instance-ids "$INSTANCE_ID" \
+          --parameters '{"commands":["echo ==== docker ps -a ==== ","sudo docker ps -a || true","echo ==== backend logs ==== ","sudo docker logs $(sudo docker ps -aq --filter name=backend | head -1) --tail 200 || true","echo ==== cloud-init-output ==== ","sudo tail -n 200 /var/log/cloud-init-output.log || true"]}' \
+          --output text || true
+
         echo "헬스체크 실패 — 배포 중단"
         exit 1
 
