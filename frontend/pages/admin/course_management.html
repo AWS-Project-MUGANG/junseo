@@ -393,15 +393,26 @@
     // 사이드바 프로필 로드
     (async () => {
       const userId = localStorage.getItem('user_no');
+      const token = localStorage.getItem('access_token');
       if (!userId) return;
       try {
-        const res = await fetch(`/api/v1/users/${userId}`);
+        const res = await fetch(`/api/v1/users/${userId}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
         if (res.ok) {
           const p = await res.json();
           const nameEl = document.getElementById('staff-name');
           const deptEl = document.getElementById('staff-dept');
           if (nameEl) nameEl.textContent = p.name || '정보전산관리부';
-          if (deptEl) deptEl.innerHTML   = `${p.college || ''}<br />${p.depart || ''} 담당`;
+          if (deptEl) {
+            const college = (p.college || '').trim();
+            const depart = (p.depart || '').trim();
+            if (college || depart) {
+              deptEl.innerHTML = `${college}<br />${depart || '교직원'} 담당`;
+            } else {
+              deptEl.innerHTML = `${p.student_id || '-'}<br />교직원 계정`;
+            }
+          }
         }
       } catch (e) { console.error('프로필 로드 오류:', e); }
     })();
