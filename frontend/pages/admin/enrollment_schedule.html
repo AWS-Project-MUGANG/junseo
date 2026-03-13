@@ -505,9 +505,9 @@
         const closeVal = document.getElementById(`day${n}-close`).value;
         return {
           day_number:       n,
-          // Backend validates string type, so send empty string instead of null.
-          open_datetime:    openVal ? localInputToUTC(openVal) : '',
-          close_datetime:   closeVal ? localInputToUTC(closeVal) : '',
+          // Inactive day may be empty; send null so backend can store nullable datetime.
+          open_datetime:    localInputToUTC(openVal),
+          close_datetime:   localInputToUTC(closeVal),
           restriction_type: DAY_RESTRICTIONS[n],
           is_active:        document.getElementById(`day${n}-active`).checked
         };

@@ -163,8 +163,8 @@ class EnrollmentRequest(BaseModel):
 
 class EnrollmentScheduleDayRequest(BaseModel):
     day_number: int
-    open_datetime: str   # UTC ISO string
-    close_datetime: str  # UTC ISO string
+    open_datetime: Optional[str] = None   # UTC ISO string
+    close_datetime: Optional[str] = None  # UTC ISO string
     restriction_type: str  # 'own_grade_dept' | 'own_college' | 'all'
     is_active: bool = True
 
@@ -1695,8 +1695,8 @@ def get_enrollment_schedule(db: Session = Depends(get_db)):
         {
             "id": s.id,
             "day_number": s.day_number,
-            "open_datetime": s.open_datetime.isoformat() + "Z",
-            "close_datetime": s.close_datetime.isoformat() + "Z",
+            "open_datetime": s.open_datetime.isoformat() + "Z" if s.open_datetime else None,
+            "close_datetime": s.close_datetime.isoformat() + "Z" if s.close_datetime else None,
             "restriction_type": s.restriction_type,
             "is_active": s.is_active,
             "updated_at": s.updated_at.isoformat() if s.updated_at else None,
@@ -1708,11 +1708,24 @@ def get_enrollment_schedule(db: Session = Depends(get_db)):
 def save_enrollment_schedule(req: EnrollmentScheduleBulkRequest, db: Session = Depends(get_db)):
     """관리자용: 수강신청 일차별 기간·제한 저장 (upsert)"""
     for day_req in req.schedules:
+        open_dt = None
+        close_dt = None
+
         try:
-            open_dt = datetime.fromisoformat(day_req.open_datetime.replace("Z", ""))
-            close_dt = datetime.fromisoformat(day_req.close_datetime.replace("Z", ""))
+            if day_req.open_datetime:
+                open_dt = datetime.fromisoformat(day_req.open_datetime.replace("Z", ""))
+            if day_req.close_datetime:
+                close_dt = datetime.fromisoformat(day_req.close_datetime.replace("Z", ""))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"날짜 형식 오류: {e}")
+
+        # 활성화 일정은 시작/종료 시간이 반드시 있어야 함
+        if day_req.is_active and (open_dt is None or close_dt is None):
+            raise HTTPException(status_code=400, detail=f"{day_req.day_number}일차: 활성 일정은 시작/종료 시간이 필요합니다.")
+
+        # 시간이 모두 있는 경우에만 순서 검증
+        if open_dt and close_dt and open_dt >= close_dt:
+            raise HTTPException(status_code=400, detail=f"{day_req.day_number}일차: 시작 시간은 종료 시간보다 이전이어야 합니다.")
 
         existing = db.query(models.EnrollmentSchedule).filter(
             models.EnrollmentSchedule.day_number == day_req.day_number
