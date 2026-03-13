@@ -635,6 +635,17 @@ def get_user_enrollments(user_id: int, db: Session = Depends(get_db)):
         lec = en.lecture
         college = (lec.depart.college if lec.depart else dept_college_map.get(lec.department)) if lec else None
         classroom = (lec.schedules[0].classroom if lec.schedules else None) if lec else None
+        schedules = []
+        if lec and lec.schedules:
+            schedules = [
+                {
+                    "day_of_week": s.day_of_week,
+                    "start_time": str(s.start_time) if s.start_time else None,
+                    "end_time": str(s.end_time) if s.end_time else None,
+                    "classroom": s.classroom,
+                }
+                for s in lec.schedules
+            ]
         result.append({
             "id": en.id,
             "lecture_id": en.lecture_id,
@@ -646,6 +657,7 @@ def get_user_enrollments(user_id: int, db: Session = Depends(get_db)):
             "type": lec.type if lec else None,
             "credits": lec.credit if lec else None,
             "enroll_status": en.enroll_status,  # BASKET | COMPLETED | CANCELED
+            "schedules": schedules,
             "created_at": en.created_at.isoformat()
         })
     return {"schedules": result}

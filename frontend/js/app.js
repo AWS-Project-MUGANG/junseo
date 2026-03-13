@@ -430,23 +430,45 @@ function renderTimetable() {
     });
 
     // 다채로운 시간표 블록 색상 배열 지정
-    const colors = ['#e3f2fd', '#e8f5e9', '#fff3e0', '#fce4ec', '#f3e5f5'];
-    
-    cartData.forEach((cartItem, index) => {
-        // 기존은 subject 매칭이었으나 API 구조에 맞춰 매칭 로직 간소화
-        const mockItem = courseList.find(c => c.subject === cartItem.subject);
-        if(mockItem && mockItem.times) {
-            const color = colors[index % colors.length];
-            mockItem.times.forEach(t => {
-                if(rows[t.time] && rows[t.time].cells[t.day]) {
-                    const cell = rows[t.time].cells[t.day];
-                    cell.innerHTML = `<span style="font-weight:bold; font-size:0.9rem;">${cartItem.subject}</span><br><span style="font-size:0.75rem; color:#666;">${cartItem.room}</span>`;
-                    cell.style.backgroundColor = color;
-                    cell.style.borderRadius = "4px";
-                    cell.style.border = `1px solid ${color}`;
-                }
-            });
+    const colors = ["#e3f2fd", "#e8f5e9", "#fff3e0", "#fce4ec", "#f3e5f5"];
+    const dayMap = { "\uC6D4": 1, "\uD654": 2, "\uC218": 3, "\uBAA9": 4, "\uAE08": 5, "\uD1A0": 6 };
+
+    const toSlot = (sch) => {
+        if (!sch || !sch.day_of_week || !sch.start_time) return null;
+        const day = dayMap[sch.day_of_week];
+        if (!day) return null;
+
+        const m = String(sch.start_time).match(/^(\d{1,2}):(\d{2})/);
+        if (!m) return null;
+        const hour = Number(m[1]);
+        const minute = Number(m[2]);
+        const time = Math.floor(((hour * 60) + minute - (9 * 60)) / 60);
+        if (time < 0 || time >= rows.length) return null;
+        return { day, time, classroom: sch.classroom || "" };
+    };
+
+    // 시간표는 최종 수강신청(COMPLETED) 과목 기준으로 표시
+    const timetableItems = cartData.filter(item => item.enroll_status === "COMPLETED");
+
+    timetableItems.forEach((cartItem, index) => {
+        const color = colors[index % colors.length];
+        let slots = Array.isArray(cartItem.schedules) ? cartItem.schedules.map(toSlot).filter(Boolean) : [];
+        if (!slots.length) {
+            const lecture = courseList.find(c => String(c.lecture_id || c.id) === String(cartItem.lecture_id));
+            if (lecture && Array.isArray(lecture.schedules)) {
+                slots = lecture.schedules.map(toSlot).filter(Boolean);
+            }
         }
+        slots.forEach(slot => {
+            if(rows[slot.time] && rows[slot.time].cells[slot.day]) {
+                const cell = rows[slot.time].cells[slot.day];
+                const room = cartItem.classroom || slot.classroom || "-";
+                cell.innerHTML = `<span style="font-weight:bold; font-size:0.9rem;">${cartItem.subject || "-"}</span><br><span style="font-size:0.75rem; color:#666;">${room}</span>`;
+                cell.style.backgroundColor = color;
+                cell.style.borderRadius = "4px";
+                cell.style.border = `1px solid ${color}`;
+            }
+        });
     });
 }
 
