@@ -285,7 +285,16 @@ def generate_answer_with_bedrock(query: str, context: str) -> str:
         bedrock = boto3.client(service_name='bedrock-runtime', region_name='us-east-1', config=config)
 
         # Claude v2/v2.1 프롬프트
-        prompt = f"\n\nHuman: 당신은 대학교 학사 행정 AI 어시스턴트입니다. 다음의 [참고 문서] 내용을 바탕으로 사용자의 [질문]에 대해 정확하고 친절하게 답변해주세요. 문서에 없는 내용은 지어내지 말고, 정보가 부족하면 모른다고 답하세요.\n\n[참고 문서]\n{context}\n\n[질문]\n{query}\n\nAssistant:"
+        prompt = (
+            "\n\nHuman: 당신은 대학교 학사행정 Q&A 어시스턴트입니다. "
+            "아래 [참고 문서]만 근거로 [질문]에 답하세요.\n"
+            "규칙:\n"
+            "1) 질문 의도에 직접 필요한 정보만 답하고 불필요한 나열 금지.\n"
+            "2) 단일 값 질문(예: 'A학점 몇 점?')은 단일 값만 간단히 답변.\n"
+            "3) 문서 근거가 없으면 추측하지 말고 '확인 불가'라고 답변.\n"
+            "4) 첫 문장에 결론을 먼저 제시.\n"
+            f"\n[참고 문서]\n{context}\n\n[질문]\n{query}\n\nAssistant:"
+        )
 
         body = json.dumps({
             "prompt": prompt,
@@ -1327,7 +1336,24 @@ def chat_ask(req: ChatRequest, db: Session = Depends(get_db)):
     def rule_based_answer(msg: str):
         compact = msg.replace(" ", "")
         # 자주 묻는 성적/평점 질문은 규칙 기반으로 즉시 답변
-        if any(k in compact for k in ["a학점", "a점수", "a+", "a0", "a-"]):
+        grade_scale = {
+            "A+": "4.5", "A0": "4.0", "A-": "3.7",
+            "B+": "3.5", "B0": "3.0", "B-": "2.7",
+            "C+": "2.5", "C0": "2.0", "C-": "1.7",
+            "D+": "1.5", "D0": "1.0", "D-": "0.7",
+            "F": "0.0"
+        }
+
+        # 단일 등급 질문 파싱: "A학점", "A+ 평점", "B0 점수" 등
+        grade_match = re.search(r"([abcdf])\s*([+\-]|0)?\s*(학점|평점|점수)?", compact, flags=re.IGNORECASE)
+        if grade_match and any(k in compact for k in ["학점", "평점", "점수", "+", "-", "0"]):
+            base = grade_match.group(1).upper()
+            sign = (grade_match.group(2) or "").replace(" ", "")
+            key = base if base == "F" else f"{base}{sign or '0'}"
+            if key in grade_scale:
+                return (f"{key}는 {grade_scale[key]}입니다.", [{"title": "성적 평점 환산(4.5 기준)", "url": "#grade-scale"}])
+
+        if any(k in compact for k in ["a학점", "a점수"]):
             return ("A+는 4.5, A0는 4.0입니다.", [{"title": "성적 평점 환산(4.5 기준)", "url": "#grade-scale"}])
         if any(k in compact for k in ["평점", "gpa"]):
             return (
