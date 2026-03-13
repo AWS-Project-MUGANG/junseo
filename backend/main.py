@@ -1327,11 +1327,12 @@ def chat_ask(req: ChatRequest, db: Session = Depends(get_db)):
     def rule_based_answer(msg: str):
         compact = msg.replace(" ", "")
         # 자주 묻는 성적/평점 질문은 규칙 기반으로 즉시 답변
-        if any(k in compact for k in ["a학점", "평점", "gpa", "a+", "a0", "a-"]):
+        if any(k in compact for k in ["a학점", "a점수", "a+", "a0", "a-"]):
+            return ("A+는 4.5, A0는 4.0입니다.", [{"title": "성적 평점 환산(4.5 기준)", "url": "#grade-scale"}])
+        if any(k in compact for k in ["평점", "gpa"]):
             return (
                 "일반적인 4.5 만점 기준은 다음과 같습니다.\n"
-                "A+ 4.5, A0 4.0, B+ 3.5, B0 3.0, C+ 2.5, C0 2.0, D+ 1.5, D0 1.0, F 0.0\n"
-                "정확한 기준은 학교 학사 규정을 확인해주세요.",
+                "A+ 4.5, A0 4.0, B+ 3.5, B0 3.0, C+ 2.5, C0 2.0, D+ 1.5, D0 1.0, F 0.0",
                 [{"title": "성적 평점 환산(일반 4.5 기준)", "url": "#grade-scale"}],
             )
         return None
