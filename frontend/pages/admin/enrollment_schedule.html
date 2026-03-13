@@ -500,13 +500,18 @@
         }
       }
 
-      const schedules = [0, 1, 2, 3].map(n => ({
-        day_number:       n,
-        open_datetime:    localInputToUTC(document.getElementById(`day${n}-open`).value),
-        close_datetime:   localInputToUTC(document.getElementById(`day${n}-close`).value),
-        restriction_type: DAY_RESTRICTIONS[n],
-        is_active:        document.getElementById(`day${n}-active`).checked
-      }));
+      const schedules = [0, 1, 2, 3].map(n => {
+        const openVal = document.getElementById(`day${n}-open`).value;
+        const closeVal = document.getElementById(`day${n}-close`).value;
+        return {
+          day_number:       n,
+          // Backend validates string type, so send empty string instead of null.
+          open_datetime:    openVal ? localInputToUTC(openVal) : '',
+          close_datetime:   closeVal ? localInputToUTC(closeVal) : '',
+          restriction_type: DAY_RESTRICTIONS[n],
+          is_active:        document.getElementById(`day${n}-active`).checked
+        };
+      });
 
       try {
         const res = await fetch(`${API_BASE}/api/v1/admin/enrollment-schedule`, {
