@@ -1324,6 +1324,26 @@ def chat_ask(req: ChatRequest, db: Session = Depends(get_db)):
     reply_text = "질문하신 내용에 대해 현재 확인 중입니다. 학사지원팀에 문의해주세요."
     source_info = []
 
+    def rule_based_answer(msg: str):
+        compact = msg.replace(" ", "")
+        # 자주 묻는 성적/평점 질문은 규칙 기반으로 즉시 답변
+        if any(k in compact for k in ["a학점", "평점", "gpa", "a+", "a0", "a-"]):
+            return (
+                "일반적인 4.5 만점 기준은 다음과 같습니다.\n"
+                "A+ 4.5, A0 4.0, B+ 3.5, B0 3.0, C+ 2.5, C0 2.0, D+ 1.5, D0 1.0, F 0.0\n"
+                "정확한 기준은 학교 학사 규정을 확인해주세요.",
+                [{"title": "성적 평점 환산(일반 4.5 기준)", "url": "#grade-scale"}],
+            )
+        return None
+
+    # 규칙으로 바로 답 가능한 질문은 RAG/LLM보다 우선 처리
+    quick = rule_based_answer(user_msg)
+    if quick:
+        reply_text, source_info = quick
+        db.add(models.ChatMessage(session_id=req.session_id, role="assistant", content=reply_text))
+        db.commit()
+        return {"reply": reply_text, "sources": source_info}
+
     # 1. RAG 벡터 검색 우선 수행 (업로드된 매뉴얼 내용 확인)
     query_vector = get_embedding(user_msg)
     rag_docs = []
@@ -1359,9 +1379,12 @@ def chat_ask(req: ChatRequest, db: Session = Depends(get_db)):
         if generated_answer:
             reply_text = generated_answer
         else:
-            # 생성 실패 시 원문 일부 반환
-            doc = rag_docs[0]
-            reply_text = f"[AI 검색 결과] 관련 내용을 찾았습니다:\n\n{doc.content[:300]}...\n\n(상세 내용은 학사 매뉴얼을 확인해주세요.)"
+            # 생성 실패 시 표/원문 덤프 대신 안내형 응답으로 처리
+            reply_text = (
+                "관련 문서를 찾았지만 답변 생성이 일시적으로 실패했습니다. "
+                "질문을 조금 더 구체적으로 입력해 주세요. "
+                "(예: 'A+ 평점 기준', '수강신청 정정 기간')"
+            )
 
     # 3. 검색 결과가 없을 때만 기존 하드코딩 규칙 적용 (Fallback)
     elif "수강신청" in user_msg or "장바구니" in user_msg:
