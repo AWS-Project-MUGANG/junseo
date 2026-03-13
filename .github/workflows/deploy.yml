@@ -1,4 +1,4 @@
-﻿name: Blue-Green Deploy to ECR & EC2
+name: Blue-Green Deploy to ECR & EC2
 
 on:
   push:
@@ -11,250 +11,233 @@ env:
   ECR_BACKEND_REPOSITORY: mugang-backend
 
 jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 1: 이미지 빌드 → ECR 푸시
+  # ────────────────────────────────────────────────────────────────────────────
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.image_tag }}
 
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Set Image Tag
-        id: set-tag
-        run: echo "image_tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+    - name: Set Image Tag (commit SHA 앞 8자리)
+      id: set-tag
+      run: echo "image_tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push Frontend Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.set-tag.outputs.image_tag }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG ./frontend
-          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG
+    - name: Build and Push Frontend Image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ steps.set-tag.outputs.image_tag }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG ./frontend
+        docker push $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG
 
-      - name: Build and Push Backend Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.set-tag.outputs.image_tag }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG ./backend
-          docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG
+    - name: Build and Push Backend Image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ steps.set-tag.outputs.image_tag }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG ./backend
+        docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: 블루-그린 배포
+  # 순서: ① active_color 확인 → ② Inactive ASG 새 이미지로 스케일업
+  #       → ③ InService 대기 → ④ 헬스체크(SSM) → ⑤ Proxy 전환(SSM)
+  #       → ⑥ active_color 교체 + 구 ASG 스케일다운
+  # ────────────────────────────────────────────────────────────────────────────
   blue-green-deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
 
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "~1.7"
-          terraform_wrapper: false
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "~1.7"
+        terraform_wrapper: false
 
-      - name: Terraform Init
-        working-directory: terraform
-        run: |
-          terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=mugang/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
+    - name: Terraform Init
+      working-directory: terraform
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+          -backend-config="key=mugang/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}"
 
-      - name: Get Current Active Color
-        id: colors
-        working-directory: terraform
-        env:
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
-        run: |
-          ACTIVE=$(terraform output -raw active_color 2>/dev/null || echo "blue")
-          INACTIVE=$([ "$ACTIVE" = "blue" ] && echo "green" || echo "blue")
-          echo "active=$ACTIVE" >> $GITHUB_OUTPUT
-          echo "inactive=$INACTIVE" >> $GITHUB_OUTPUT
-          echo "Current active: $ACTIVE / Target: $INACTIVE"
+    # ── Step 1: 현재 active 색 읽기 ──────────────────────────────────────────
+    - name: Get Current Active Color
+      id: colors
+      working-directory: terraform
+      env:
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
+      run: |
+        ACTIVE=$(terraform output -raw active_color 2>/dev/null || echo "blue")
+        INACTIVE=$( [ "$ACTIVE" = "blue" ] && echo "green" || echo "blue" )
+        echo "active=$ACTIVE"     >> $GITHUB_OUTPUT
+        echo "inactive=$INACTIVE" >> $GITHUB_OUTPUT
+        echo "현재 라이브: $ACTIVE  /  배포 대상: $INACTIVE"
 
-      - name: Deploy New Image to Inactive
-        working-directory: terraform
-        env:
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
-          TF_VAR_active_color: ${{ steps.colors.outputs.active }}
-          TF_VAR_blue_desired: "1"
-          TF_VAR_green_desired: "1"
-          TF_VAR_blue_image_tag: ${{ steps.colors.outputs.inactive == 'blue' && needs.build-and-push.outputs.image_tag || 'latest' }}
-          TF_VAR_green_image_tag: ${{ steps.colors.outputs.inactive == 'green' && needs.build-and-push.outputs.image_tag || 'latest' }}
-        run: terraform apply -auto-approve
+    # ── Step 2: Inactive ASG 스케일다운(0) → 새 이미지 적용 → 스케일업(1) ──────
+    - name: Scale Down Inactive ASG to 0 (${{ steps.colors.outputs.inactive }})
+      working-directory: terraform
+      env:
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
+        TF_VAR_active_color: ${{ steps.colors.outputs.active }}
+        TF_VAR_blue_desired:  ${{ steps.colors.outputs.inactive == 'blue'  && '0' || '1' }}
+        TF_VAR_green_desired: ${{ steps.colors.outputs.inactive == 'green' && '0' || '1' }}
+        TF_VAR_blue_image_tag:  ${{ steps.colors.outputs.inactive == 'blue'  && needs.build-and-push.outputs.image_tag || 'latest' }}
+        TF_VAR_green_image_tag: ${{ steps.colors.outputs.inactive == 'green' && needs.build-and-push.outputs.image_tag || 'latest' }}
+      run: terraform apply -auto-approve
 
-      - name: Wait for Inactive ASG InService
-        env:
-          INACTIVE: ${{ steps.colors.outputs.inactive }}
-        run: |
-          echo "Waiting for mugang-${INACTIVE}-asg InService..."
-          for i in $(seq 1 30); do
-            STATE=$(aws autoscaling describe-auto-scaling-instances \
-              --query "AutoScalingInstances[?AutoScalingGroupName=='mugang-${INACTIVE}-asg'].LifecycleState" \
-              --output text 2>/dev/null | head -1)
-            echo "  [${i}/30] state: ${STATE:-none}"
-            if [ "$STATE" = "InService" ]; then
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "ASG not InService in time"
-              exit 1
-            fi
-            sleep 10
-          done
+    - name: Deploy New Image to Inactive (${{ steps.colors.outputs.inactive }})
+      working-directory: terraform
+      env:
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
+        TF_VAR_active_color: ${{ steps.colors.outputs.active }}
+        TF_VAR_blue_desired:  ${{ steps.colors.outputs.inactive == 'blue'  && '1' || '1' }}
+        TF_VAR_green_desired: ${{ steps.colors.outputs.inactive == 'green' && '1' || '1' }}
+        TF_VAR_blue_image_tag:  ${{ steps.colors.outputs.inactive == 'blue'  && needs.build-and-push.outputs.image_tag || 'latest' }}
+        TF_VAR_green_image_tag: ${{ steps.colors.outputs.inactive == 'green' && needs.build-and-push.outputs.image_tag || 'latest' }}
+      run: terraform apply -auto-approve
 
-      - name: Health Check via SSM
-        id: healthcheck
-        env:
-          INACTIVE: ${{ steps.colors.outputs.inactive }}
-        run: |
-          INSTANCE_ID=$(aws autoscaling describe-auto-scaling-instances \
-            --query "AutoScalingInstances[?AutoScalingGroupName=='mugang-${INACTIVE}-asg'&&LifecycleState=='InService'].InstanceId" \
-            --output text | head -1)
-          INACTIVE_IP=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-            --output text)
-          echo "inactive_ip=$INACTIVE_IP" >> $GITHUB_OUTPUT
-          echo "Inactive EC2 IP: $INACTIVE_IP"
+    # ── Step 3: Inactive ASG 인스턴스 InService 대기 (최대 5분) ──────────────
+    - name: Wait for Inactive ASG InService
+      env:
+        INACTIVE: ${{ steps.colors.outputs.inactive }}
+      run: |
+        echo "mugang-${INACTIVE}-asg 인스턴스 InService 대기..."
+        for i in $(seq 1 30); do
+          STATE=$(aws autoscaling describe-auto-scaling-instances \
+            --query "AutoScalingInstances[?AutoScalingGroupName=='mugang-${INACTIVE}-asg'].LifecycleState" \
+            --output text 2>/dev/null | head -1)
+          echo "  [${i}/30] 상태: ${STATE:-없음}"
+          if [ "$STATE" = "InService" ]; then
+            echo "InService 확인!"
+            break
+          fi
+          if [ "$i" -eq 30 ]; then
+            echo "타임아웃 — 배포 중단"
+            exit 1
+          fi
+          sleep 10
+        done
 
-          echo "Waiting inactive SSM Online..."
-          for i in $(seq 1 30); do
-            PING=$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
-              --query "InstanceInformationList[0].PingStatus" \
-              --output text 2>/dev/null || echo "None")
-            echo "  [${i}/30] Inactive SSM: $PING"
-            if [ "$PING" = "Online" ]; then
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "Inactive SSM not online: $PING"
-              exit 1
-            fi
-            sleep 10
-          done
+    # ── Step 4: Inactive EC2 IP 취득 + 헬스체크 (Proxy EC2 경유 SSM) ─────────
+    - name: Health Check via SSM
+      id: healthcheck
+      env:
+        INACTIVE: ${{ steps.colors.outputs.inactive }}
+      run: |
+        # Inactive EC2 Private IP 취득
+        INSTANCE_ID=$(aws autoscaling describe-auto-scaling-instances \
+          --query "AutoScalingInstances[?AutoScalingGroupName=='mugang-${INACTIVE}-asg'&&LifecycleState=='InService'].InstanceId" \
+          --output text | head -1)
+        INACTIVE_IP=$(aws ec2 describe-instances \
+          --instance-ids "$INSTANCE_ID" \
+          --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+          --output text)
+        echo "inactive_ip=$INACTIVE_IP" >> $GITHUB_OUTPUT
+        echo "Inactive EC2 IP: $INACTIVE_IP"
 
-          PROXY_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=mugang-proxy" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)
-          echo "proxy_id=$PROXY_ID" >> $GITHUB_OUTPUT
+        # Proxy EC2 Instance ID 취득
+        PROXY_ID=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=mugang-proxy" "Name=instance-state-name,Values=running" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text)
+        echo "proxy_id=$PROXY_ID" >> $GITHUB_OUTPUT
 
-          echo "Waiting proxy SSM Online..."
-          for i in $(seq 1 18); do
-            PROXY_PING=$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=${PROXY_ID}" \
-              --query "InstanceInformationList[0].PingStatus" \
-              --output text 2>/dev/null || echo "None")
-            echo "  [${i}/18] Proxy SSM: $PROXY_PING"
-            if [ "$PROXY_PING" = "Online" ]; then
-              break
-            fi
-            if [ "$i" -eq 18 ]; then
-              echo "Proxy SSM not online: $PROXY_PING"
-              exit 1
-            fi
-            sleep 10
-          done
+        # Docker 설치 및 컨테이너 시작 대기 (apt-get 소요 시간)
+        echo "컨테이너 초기화 대기 중 (5분)..."
+        sleep 300
 
-          echo "Health check up to 4 minutes..."
-          for i in $(seq 1 20); do
-            CMD_ID=$(aws ssm send-command \
-              --document-name "AWS-RunShellScript" \
-              --instance-ids "$INSTANCE_ID" \
-              --parameters commands='["curl -fsS http://127.0.0.1:8000/docs >/dev/null"]' \
-              --query 'Command.CommandId' --output text 2>/dev/null || echo "")
-
-            if [ -z "$CMD_ID" ]; then
-              echo "  [${i}/20] health: NoCommandId"
-              sleep 8
-              continue
-            fi
-
-            ATTEMPT_STATUS="Pending"
-            for j in $(seq 1 8); do
-              ATTEMPT_STATUS=$(aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'Status' --output text 2>/dev/null || echo "Pending")
-
-              if [ "$ATTEMPT_STATUS" = "Success" ]; then
-                echo "  [${i}/20] health: Success"
-                exit 0
-              fi
-
-              if [ "$ATTEMPT_STATUS" = "Failed" ] || [ "$ATTEMPT_STATUS" = "Cancelled" ] || [ "$ATTEMPT_STATUS" = "TimedOut" ]; then
-                break
-              fi
-
-              sleep 3
-            done
-
-            echo "  [${i}/20] health: $ATTEMPT_STATUS"
-            sleep 5
-          done
-
-          echo "Health check failed"
-          exit 1
-
-      - name: Switch Proxy Nginx
-        env:
-          INACTIVE: ${{ steps.colors.outputs.inactive }}
-          INACTIVE_IP: ${{ steps.healthcheck.outputs.inactive_ip }}
-          PROXY_ID: ${{ steps.healthcheck.outputs.proxy_id }}
-        run: |
+        # Proxy에서 Inactive EC2로 헬스체크 (SSM RunCommand)
+        echo "헬스체크 대기 중 (최대 6분)..."
+        for i in $(seq 1 45); do
           CMD_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --instance-ids "$PROXY_ID" \
-            --parameters "{\"commands\":[\"/usr/local/bin/update-proxy.sh $INACTIVE $INACTIVE_IP\"]}" \
-            --query 'Command.CommandId' --output text)
-          echo "Switch Command ID: $CMD_ID"
+            --parameters "{\"commands\":[\"curl -fsS --max-time 5 http://${INACTIVE_IP}:8000/docs\"]}" \
+            --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
-          for i in $(seq 1 20); do
-            STATUS=$(aws ssm get-command-invocation \
+          if [ -z "$CMD_ID" ]; then
+            echo "  [${i}/45] SSM 전송 실패, 재시도..."
+            sleep 8
+            continue
+          fi
+
+          # Pending/InProgress는 실패로 보지 않고 완료될 때까지 폴링
+          RESULT="Pending"
+          for j in $(seq 1 6); do
+            sleep 5
+            RESULT=$(aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
               --instance-id "$PROXY_ID" \
               --query 'StatusDetails' --output text 2>/dev/null || echo "Pending")
-            echo "  [${i}/20] switch status: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
+            echo "  [${i}/45] 헬스체크: $RESULT"
+            if [ "$RESULT" = "Success" ] || [ "$RESULT" = "Failed" ] || \
+               [ "$RESULT" = "TimedOut" ] || [ "$RESULT" = "Cancelled" ]; then
               break
             fi
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              echo "Proxy switch failed"
-              exit 1
-            fi
-            sleep 3
           done
 
-      - name: Finalize
-        working-directory: terraform
-        env:
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
-          TF_VAR_active_color: ${{ steps.colors.outputs.inactive }}
-          TF_VAR_blue_desired: ${{ steps.colors.outputs.inactive == 'blue' && '1' || '0' }}
-          TF_VAR_green_desired: ${{ steps.colors.outputs.inactive == 'green' && '1' || '0' }}
-          TF_VAR_blue_image_tag: ${{ steps.colors.outputs.inactive == 'blue' && needs.build-and-push.outputs.image_tag || 'latest' }}
-          TF_VAR_green_image_tag: ${{ steps.colors.outputs.inactive == 'green' && needs.build-and-push.outputs.image_tag || 'latest' }}
-        run: terraform apply -auto-approve
+          if [ "$RESULT" = "Success" ]; then
+            echo "헬스체크 통과!"
+            exit 0
+          fi
+        done
+        echo "헬스체크 실패 — 배포 중단"
+        exit 1
+
+    # ── Step 5: Proxy Nginx upstream을 Inactive EC2로 전환 (SSM) ─────────────
+    - name: Switch Proxy Nginx → ${{ steps.colors.outputs.inactive }}
+      env:
+        INACTIVE: ${{ steps.colors.outputs.inactive }}
+        INACTIVE_IP: ${{ steps.healthcheck.outputs.inactive_ip }}
+        PROXY_ID: ${{ steps.healthcheck.outputs.proxy_id }}
+      run: |
+        aws ssm send-command \
+          --document-name "AWS-RunShellScript" \
+          --instance-ids "$PROXY_ID" \
+          --parameters "{\"commands\":[\"/usr/local/bin/update-proxy.sh $INACTIVE $INACTIVE_IP\"]}"
+        echo "Proxy nginx → ${INACTIVE} (${INACTIVE_IP}) 전환 완료"
+
+    # ── Step 6: active_color 교체 + 구 ASG 스케일다운 ────────────────────────
+    - name: Finalize — Switch active_color to ${{ steps.colors.outputs.inactive }}
+      working-directory: terraform
+      env:
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
+        TF_VAR_active_color: ${{ steps.colors.outputs.inactive }}
+        TF_VAR_blue_desired:  ${{ steps.colors.outputs.inactive == 'blue'  && '1' || '0' }}
+        TF_VAR_green_desired: ${{ steps.colors.outputs.inactive == 'green' && '1' || '0' }}
+        TF_VAR_blue_image_tag:  ${{ steps.colors.outputs.inactive == 'blue'  && needs.build-and-push.outputs.image_tag || 'latest' }}
+        TF_VAR_green_image_tag: ${{ steps.colors.outputs.inactive == 'green' && needs.build-and-push.outputs.image_tag || 'latest' }}
+      run: |
+        terraform apply -auto-approve
+        echo "배포 완료: ${{ steps.colors.outputs.inactive }} 환경이 라이브입니다."
