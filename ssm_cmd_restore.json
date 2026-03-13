@@ -1,0 +1,8 @@
+{
+  "commands": [
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -f /tmp/tmp_mugang_migration.sql",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"SELECT count(*) AS users FROM user_tb;\"",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"SELECT count(*) AS lectures FROM lecture_tb;\"",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"\\dt\""
+  ]
+}

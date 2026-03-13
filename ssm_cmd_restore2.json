@@ -1,0 +1,9 @@
+{
+  "commands": [
+    "aws s3 cp s3://mugang-s3/migration/tmp_mugang_migration_utf8.sql /tmp/tmp_mugang_migration_utf8.sql --region ap-northeast-2",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -f /tmp/tmp_mugang_migration_utf8.sql",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"SELECT COUNT(*) AS users FROM user_tb;\"",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"SELECT COUNT(*) AS lectures FROM lecture_tb;\"",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"\\dt\""
+  ]
+}

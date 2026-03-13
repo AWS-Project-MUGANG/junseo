@@ -1,0 +1,8 @@
+{
+  "commands": [
+    "sudo apt-get update -y",
+    "sudo apt-get install -y postgresql-client",
+    "aws s3 cp s3://mugang-s3/migration/tmp_mugang_migration.sql /tmp/tmp_mugang_migration.sql --region ap-northeast-2",
+    "PGPASSWORD=junseo2015! psql -h mugang-db.czui6uqasxf9.ap-northeast-2.rds.amazonaws.com -U mugangadmin -d mugang -c \"\\dt\""
+  ]
+}
