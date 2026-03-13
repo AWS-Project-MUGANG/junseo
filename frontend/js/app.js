@@ -981,10 +981,12 @@ function initChatbot() {
 // ── 기존 함수명 더미 ──
 // dashboard.html 에서 onclick="requestAIRecommend()" 호출이 남아 있을 수 있으니 더미 유지 또는 챗봇 열려있게 유도
 window.requestAIRecommend = function() {
-    alert("AI 학사 비서 기능은 현재 비활성화되어 있습니다.");
+    const fab = document.getElementById('chatbotFab');
+    if (fab) fab.click();
 };
 window.toggleChat = function() {
-    alert("AI 학사 비서 기능은 현재 비활성화되어 있습니다.");
+    const fab = document.getElementById('chatbotFab');
+    if (fab) fab.click();
 };
 window.sendChatMessage = function() {};
 
@@ -1002,8 +1004,8 @@ window.onload = async function() {
     await loadEnrollments();
     await loadStats();
     await loadNotices();
-    // AI 학사 비서(챗봇)는 현재 운영 요구사항에 따라 비활성화.
-    // initChatbot();
+    initChatbot();
+
 };
 
 window.generateCertificatePDF = async function() {
