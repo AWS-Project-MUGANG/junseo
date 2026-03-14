@@ -1,7 +1,19 @@
-﻿# 무강대학교 AI 학사행정 서비스 Web APP
+﻿# 무강대학교 AI 학사행정 서비스 Web App
 
 FastAPI + Vanilla JS 기반의 AI 학사행정 웹 애플리케이션입니다.  
-학생/교직원 로그인, 수강신청, 관리자 과목관리, RAG 기반 학사 Q&A를 제공합니다.
+학생/교직원 로그인, 수강신청, 관리자 과목 관리, RAG 기반 학사 Q&A를 제공합니다.
+
+---
+
+## Quick Start
+
+```bash
+docker compose up -d --build
+```
+
+- Frontend: `http://localhost:8888`
+- Backend Docs: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/api/health`
 
 ---
 
@@ -60,7 +72,7 @@ FastAPI + Vanilla JS 기반의 AI 학사행정 웹 애플리케이션입니다.
 
 ---
 
-## 4) 저장소 분석 요약
+## 4) 저장소 구성 요약
 
 이 저장소는 FastAPI 모놀리식 API 서버 + 정적 프론트엔드 조합입니다.  
 수강신청 로직, 관리자 기능, RAG 문서 업로드/검색, 배포 인프라(Terraform)가 한 저장소에 포함돼 있습니다.
@@ -179,7 +191,7 @@ terraform output
 
 ---
 
-## 8-1) 현재 AWS 리소스 스냅샷 (2026-03-14)
+## 8-4) 현재 AWS 리소스 스냅샷 (2026-03-14)
 
 | 리소스 | 현재 상태 | 식별자/값 |
 | --- | --- | --- |
@@ -264,34 +276,107 @@ terraform output
 
 ---
 
-## 12) Mermaid 다이어그램
+## 12) 아키텍처 다이어그램
 
-### 12-1. 배포 구조
+### 12-0. 실제 사용 AWS 리소스
+
+한눈에 보이도록 `리소스군 / 실제 서비스 / 역할` 기준으로 정리했습니다.
+
+| 리소스군 | 실제 서비스 | 역할 |
+| --- | --- | --- |
+| 네트워크 | VPC, Public/Private Subnet, IGW, NAT, Route Table, Security Group | 외부/내부 트래픽 분리, 라우팅, 포트 제어 |
+| 컴퓨팅 | EC2 Proxy, Launch Template(Blue/Green), ASG(Blue/Green) | 프록시 라우팅, 무중단 배포, 앱 실행 |
+| 데이터 | RDS PostgreSQL, DynamoDB(`mugang-chat-history`) | 핵심 트랜잭션 저장, 대화 이력 저장 |
+| 이미지/상태 | ECR(frontend/backend), S3(Terraform backend state) | 컨테이너 이미지 저장, 인프라 상태 관리 |
+| 접근/운영 | IAM Role/Profile/Policy, SSM(Session/RunCommand) | 권한 제어, 원격 점검/명령 수행 |
+| CI/CD/AI | GitHub Actions, Bedrock Runtime | 자동 배포 파이프라인, LLM/임베딩 호출 |
+
+### 12-1. AWS 인프라 아키텍처 (요약)
+
+```mermaid
+flowchart LR
+    USER[User Browser] --> PROXY[EC2 Proxy Nginx]
+    PROXY --> BLUE[Blue App EC2]
+    PROXY -. switch .-> GREEN[Green App EC2]
+
+    BLUE --> RDS[(RDS PostgreSQL)]
+    GREEN --> RDS
+    BLUE -. optional .-> DDB[(DynamoDB)]
+    GREEN -. optional .-> DDB
+
+    GHA[GitHub Actions] --> ECR[(ECR)]
+    GHA --> S3[(S3 Terraform State)]
+    ECR --> BLUE
+    ECR --> GREEN
+    SSM[SSM] --> PROXY
+    SSM --> BLUE
+    SSM --> GREEN
+```
+
+### 12-2. AWS 인프라 아키텍처 (상세)
 
 ```mermaid
 flowchart LR
     USER[User Browser]
-    PROXY[Proxy EC2 Nginx]
-    BLUE[Blue ASG App]
-    GREEN[Green ASG App]
-    RDS[(RDS PostgreSQL)]
-    DDB[(DynamoDB chat_history)]
-    ECR[ECR]
-    GH[GitHub Actions]
+
+    subgraph AWS[AWS ap-northeast-2]
+        subgraph VPC[VPC 10.0.0.0/16]
+            subgraph PUB[Public Subnet 10.0.1.0/24]
+                PROXY[EC2 Proxy (Nginx)]
+            end
+
+            subgraph APP[Private App Subnets]
+                BLUE[Blue ASG / EC2\n10.0.2.0/24]
+                GREEN[Green ASG / EC2\n10.0.3.0/24]
+            end
+
+            RDS[(RDS PostgreSQL)]
+            DDB[(DynamoDB)]
+            NAT[NAT Gateway]
+            IGW[Internet Gateway]
+        end
+    end
 
     USER --> PROXY
     PROXY --> BLUE
-    PROXY -. switch .-> GREEN
+    PROXY -. blue/green switch .-> GREEN
     BLUE --> RDS
     GREEN --> RDS
-    BLUE -. optional log/history .-> DDB
-    GREEN -. optional log/history .-> DDB
-    GH --> ECR
-    GH --> BLUE
-    GH --> GREEN
+    BLUE -. optional .-> DDB
+    GREEN -. optional .-> DDB
+    BLUE --> NAT
+    GREEN --> NAT
+    NAT --> IGW
 ```
 
-### 12-2. 챗봇 질의 흐름
+### 12-3. 서비스 아키텍처 (논리 구성)
+
+```mermaid
+flowchart LR
+    U[User] --> WEB[Web UI\nNginx + HTML/CSS/JS]
+    WEB --> API[FastAPI API Layer]
+
+    subgraph DOMAIN[Application Domain]
+        AUTH[Auth\nLogin/First Setup/JWT]
+        ENROLL[Enrollment\n강의조회/장바구니/신청/취소]
+        ADMIN[Admin\n과목관리/일정관리/서버관리]
+        RAG[RAG/Chat\n문서업로드/벡터검색/추천]
+    end
+
+    API --> AUTH
+    API --> ENROLL
+    API --> ADMIN
+    API --> RAG
+
+    AUTH --> PG[(PostgreSQL + pgvector)]
+    ENROLL --> PG
+    ADMIN --> PG
+    RAG --> PG
+    RAG --> BEDROCK[AWS Bedrock Runtime]
+    API -. optional chat history .-> DDB[(DynamoDB)]
+```
+
+### 12-4. 챗봇 질의 흐름
 
 ```mermaid
 sequenceDiagram
@@ -322,7 +407,7 @@ sequenceDiagram
 - Frontend Main JS: `frontend/js/app.js`
 - Frontend Chatbot JS: `frontend/js/new_chatbot.js`
 - Local Compose: `docker-compose.yml`
-- AWS Compose(참고): `docker-compose.aws.yml`
+- AWS Compose(보조 실행): `docker-compose.aws.yml`
 - Terraform: `terraform/*.tf`
 - K8s(참고): `k8s/*.yaml`
 - Deploy Workflow: `.github/workflows/deploy.yml`
@@ -399,11 +484,9 @@ sequenceDiagram
 1. GitHub Actions 배포 성공 및 단계 로그  
 ![cicd-github-actions-success](images/cicd-github-actions-success.png)
 
----
 
-## 19) 캡처 촬영 가이드
 
-- 주소창이 보이도록 캡처해 URL 증빙을 남깁니다.
-- 가능하면 작업표시줄 시간까지 포함해 촬영 시점을 보여줍니다.
-- 비밀번호, Access Key, Secret은 반드시 가림 처리합니다.
-- 본 README는 `images/` 폴더의 캡처 파일을 기준으로 작성합니다.
+
+
+
+
