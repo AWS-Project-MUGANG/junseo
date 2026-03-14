@@ -317,29 +317,29 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    USER[User Browser]
+    USER["User Browser"]
 
-    subgraph AWS[AWS ap-northeast-2]
-        subgraph VPC[VPC 10.0.0.0/16]
-            subgraph PUB[Public Subnet 10.0.1.0/24]
-                PROXY[EC2 Proxy (Nginx)]
+    subgraph AWS["AWS ap-northeast-2"]
+        subgraph VPC["VPC 10.0.0.0-16"]
+            subgraph PUB["Public Subnet 10.0.1.0-24"]
+                PROXY["EC2 Proxy - Nginx"]
             end
 
-            subgraph APP[Private App Subnets]
-                BLUE[Blue ASG / EC2\n10.0.2.0/24]
-                GREEN[Green ASG / EC2\n10.0.3.0/24]
+            subgraph APP["Private App Subnets"]
+                BLUE["Blue ASG and EC2 10.0.2.0-24"]
+                GREEN["Green ASG and EC2 10.0.3.0-24"]
             end
 
-            RDS[(RDS PostgreSQL)]
-            DDB[(DynamoDB)]
-            NAT[NAT Gateway]
-            IGW[Internet Gateway]
+            RDS["RDS PostgreSQL"]
+            DDB["DynamoDB"]
+            NAT["NAT Gateway"]
+            IGW["Internet Gateway"]
         end
     end
 
     USER --> PROXY
     PROXY --> BLUE
-    PROXY -. blue/green switch .-> GREEN
+    PROXY -. switch .-> GREEN
     BLUE --> RDS
     GREEN --> RDS
     BLUE -. optional .-> DDB
